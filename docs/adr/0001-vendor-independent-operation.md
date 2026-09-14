@@ -1,0 +1,9 @@
+# Preserve operation without the vendor
+
+The system must retain local recording, remote viewing, and alerts if the product vendor ceases operating, assuming working hardware and customer-provided connectivity. Remote functionality must therefore have a path independent of vendor-operated servers, potentially using customer-controlled services; the specific mechanism remains undecided. This prioritizes customer ownership and product longevity over the simpler setup of a mandatory vendor service, accepting additional engineering and potentially additional customer setup.
+
+The product must use no company-operated services, including during normal operation. The earlier interpretation that vendor services could provide the default experience was rejected by the user. Normal setup should require only the system, a phone, and a customer-provided cellular plan; customer-hosted infrastructure is acceptable only as a fallback. How remote viewing and alerts satisfy these constraints remains unresolved, including whether customer-selected third-party services are acceptable.
+
+Customer-selected third-party services for remote connectivity or notifications are permitted as an optional future capability, deferred beyond the first version. Remote viewing and alerts are required at launch; third-party integrations cannot be assumed to solve their delivery. The delivery mechanism remains unresolved.
+
+Optional off-site storage of event snapshots or clips is included at launch to preserve uploaded evidence if the controller is stolen. Customers choose and control the storage destination; no company-operated storage service is permitted. This is an exception to the earlier integration deferral for storage only. Upload policy, protocol, encryption, and data limits remain undecided; footage that has not reached the off-site destination is not protected from loss of the controller.

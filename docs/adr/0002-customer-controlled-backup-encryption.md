@@ -1,0 +1,3 @@
+# Encrypt backups before upload with customer-controlled keys
+
+Off-site event footage must be encrypted on the controller before upload, with decryption keys controlled by the customer, so the storage provider cannot view the footage. This preserves customer control at the cost of requiring explicit key recovery and client-side decryption rather than relying on the storage provider's viewer or account recovery. Enabling backup requires saving a customer-held recovery key outside the phone and controller, as a printable code or securely saved file. The exact format and confirmation flow remain undecided. Loss of all necessary device keys and the recovery key makes the encrypted footage unrecoverable.

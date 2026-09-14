@@ -1,0 +1,43 @@
+# Modular Security System
+
+A modular outdoor security product whose customers own and control their data.
+
+## Language
+
+**Controller**:
+The central module containing the rechargeable battery and accepting connections from one or more cameras.
+_Avoid_: Hub, base station
+
+**Camera**:
+A replaceable imaging module that plugs into the controller.
+
+**Solar panel**:
+The separate module that supplies solar energy to the system.
+
+**System**:
+The controller, solar panel, and connected cameras considered as one security installation.
+_Avoid_: Camera, when referring to the entire installation
+
+**Stand-alone**:
+A system whose local recording, remote viewing, and alerts remain usable without services operated by the product vendor, including after the vendor ceases operating. Remote features may depend on customer-provided connectivity and customer-controlled services.
+_Avoid_: Offline-only, cloud-free
+
+**Identification zone**:
+A defined area of the monitored site where recorded footage is intended to provide enough detail for a customer to identify a person or read a vehicle's licence plate.
+_Avoid_: Detection zone, when identification detail is required
+
+**Owner**:
+The single person with administrative authority over a system, including its settings, access permissions, keys, and additional data authorization.
+_Avoid_: Viewer, administrator account
+
+**Viewer**:
+A person invited by the owner to watch a system's live video and recordings, with individually revocable access and no administrative authority. Alert delivery and download/export permission are granted separately by the owner.
+_Avoid_: Owner, shared login
+
+**Protected clip**:
+An event recording the owner has selected to retain outside automatic overwrite, subject to the system's limited protected-storage allocation.
+_Avoid_: Backup, permanent recording
+
+**Weather-resistant assembly**:
+The installed system with connected cables, capped unused ports, and closed service covers, intended to withstand outdoor rain, snow, dust, and hose spray. Submersion is outside its launch exposure scope.
+_Avoid_: Waterproof, without a defined exposure or test rating
