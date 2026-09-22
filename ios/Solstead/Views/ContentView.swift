@@ -202,37 +202,87 @@ struct PairingSection: View {
 struct HealthSection: View {
     @EnvironmentObject private var model: ControllerModel
     let status: ControllerStatus
+    @State private var expanded = false
+
+    enum Condition {
+        case good, warning, danger
+
+        var colour: Color {
+            switch self {
+            case .good: return .green
+            case .warning: return .yellow
+            case .danger: return .red
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .good: return "All good"
+            case .warning: return "Needs attention"
+            case .danger: return "Problem"
+            }
+        }
+    }
+
+    /// Red for anything that stops recording or corrupts evidence, yellow for degraded or
+    /// recently troubled, green otherwise.
+    static func condition(of status: ControllerStatus) -> Condition {
+        let health = status.health
+        if !status.storage.ready || health?.clockOk == false || (health?.lastDay.error ?? 0) > 0 {
+            return .danger
+        }
+        if let events = status.events, events.enabled, !(events.running && events.bufferRunning && events.cameraSubscribed) {
+            return .danger
+        }
+        if (health?.lastDay.warning ?? 0) > 0 || status.events?.cameraError != nil || status.events?.lastError != nil {
+            return .warning
+        }
+        return .good
+    }
 
     var body: some View {
-        Section("Controller health") {
-            LabeledContent("Name", value: status.name)
-            LabeledContent("Software", value: status.version)
-            LabeledContent("Uptime", value: Duration.seconds(status.uptimeSeconds).formatted(.units(allowed: [.days, .hours, .minutes], width: .abbreviated)))
-            if let temperature = status.temperatureC {
-                LabeledContent("CPU temperature", value: String(format: "%.1f °C", temperature))
-            }
-            LabeledContent("Storage", value: status.storage.ready ? "Ready" : "Unavailable")
-            if let free = status.storage.freeBytes, let total = status.storage.totalBytes {
-                LabeledContent("Available", value: "\(bytes(free)) of \(bytes(total))")
-            }
-            if let error = status.storage.error {
-                Text(error).foregroundStyle(.red)
-            }
-            LabeledContent("Camera", value: status.camera.configured ? "Configured" : "Not configured")
-            if let last = status.camera.lastSuccessUnix {
-                LabeledContent("Last capture", value: Date(timeIntervalSince1970: TimeInterval(last)).formatted(date: .abbreviated, time: .shortened))
-            }
-            LabeledContent("Remote access", value: status.remoteAccess ? "On" : "Off (local network only)")
-            if let health = status.health {
-                if !health.clockOk {
-                    Label("Controller clock is not set", systemImage: "clock.badge.exclamationmark").foregroundStyle(.red)
+        let condition = Self.condition(of: status)
+        Section {
+            DisclosureGroup(isExpanded: $expanded) {
+                LabeledContent("Name", value: status.name)
+                LabeledContent("Software", value: status.version)
+                LabeledContent("Uptime", value: Duration.seconds(status.uptimeSeconds).formatted(.units(allowed: [.days, .hours, .minutes], width: .abbreviated)))
+                if let temperature = status.temperatureC {
+                    LabeledContent("CPU temperature", value: String(format: "%.1f °C", temperature))
                 }
-                LabeledContent("Last 24 hours", value: health.lastDay.error == 0 && health.lastDay.warning == 0
-                    ? "No problems" : "\(health.lastDay.error) errors, \(health.lastDay.warning) warnings")
-                ForEach(health.latest) { entry in
-                    HealthRow(entry: entry)
+                LabeledContent("Storage", value: status.storage.ready ? "Ready" : "Unavailable")
+                if let free = status.storage.freeBytes, let total = status.storage.totalBytes {
+                    LabeledContent("Available", value: "\(bytes(free)) of \(bytes(total))")
                 }
-                Button("Show health log", systemImage: "list.bullet.rectangle") { Task { await model.showHealth() } }
+                if let error = status.storage.error {
+                    Text(error).foregroundStyle(.red)
+                }
+                LabeledContent("Camera", value: status.camera.configured ? "Configured" : "Not configured")
+                if let last = status.camera.lastSuccessUnix {
+                    LabeledContent("Last capture", value: Date(timeIntervalSince1970: TimeInterval(last)).formatted(date: .abbreviated, time: .shortened))
+                }
+                LabeledContent("Remote access", value: status.remoteAccess ? "On" : "Off (local network only)")
+                if let health = status.health {
+                    if !health.clockOk {
+                        Label("Controller clock is not set", systemImage: "clock.badge.exclamationmark").foregroundStyle(.red)
+                    }
+                    LabeledContent("Last 24 hours", value: health.lastDay.error == 0 && health.lastDay.warning == 0
+                        ? "No problems" : "\(health.lastDay.error) errors, \(health.lastDay.warning) warnings")
+                    ForEach(health.latest) { entry in
+                        HealthRow(entry: entry)
+                    }
+                    Button("Show health log", systemImage: "list.bullet.rectangle") { Task { await model.showHealth() } }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(condition.colour)
+                        .frame(width: 12, height: 12)
+                        .accessibilityLabel(condition.label)
+                    Text("Controller health")
+                    Spacer()
+                    Text(condition.label).foregroundStyle(.secondary)
+                }
             }
         }
     }
