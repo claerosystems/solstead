@@ -13,7 +13,7 @@ and the ADRs under [adr/](adr/).
  │  └ SolsteadKit      │  :8443  │             │    ├── buffer.py (ffmpeg) ◀─RTSP──│        │
  │     ControllerClient│         │             │    ├── motion.py ── onvif.py ◀─ONVIF─│ events │
  │     PinnedTrust     │         │             │    └── events.py ── clips.py       └────────┘
- └─────────────────────┘         │             └── storage.py ── SSD: buffer/ events/ manual/
+ └─────────────────────┘         │             └── storage.py ── SSD: events/ (sealed) manual/
                                  │ provisioning.py: token, cert, config.json
                                  └────────────────────────────────────────┘
 ```
@@ -35,6 +35,10 @@ and the ADRs under [adr/](adr/).
   allocation, and the controller assembles a day into a video on request. The owner changes the
   interval and window from the app; the controller persists them and reports the retention that
   schedule allows.
+- Stored recordings are sealed to the owner's public keys in the age file format (ADR 0003). The
+  controller holds only public keys, so it records unattended after a power cut but cannot
+  decrypt its own footage; the phone decrypts. Plaintext video (the pre-event buffer and clip
+  assembly) stays in RAM.
 - Event recording follows the accepted defaults: a clip starts 10 seconds before the first
   detected activity and ends 30 seconds after the last. The camera's own motion detection is the
   trigger, delivered over ONVIF; the controller does no image analysis. The last minute of the
@@ -43,8 +47,8 @@ and the ADRs under [adr/](adr/).
 
 ## Repository layout
 
-- `controller/` is a standard-library Python package (`solstead`) with pytest tests, a CLI, a
-  systemd unit and an installer. See [controller/README.md](../controller/README.md).
+- `controller/` is a Python package (`solstead`, standard library plus `cryptography`) with
+  pytest tests, a CLI, a systemd unit and an installer. See [controller/README.md](../controller/README.md).
 - `ios/SolsteadKit/` is a Swift package with the platform-independent parts of the app: pairing
   validation, certificate pinning, the API models and the client. It tests with `swift test` on
   macOS, so no simulator is needed for unit tests.
@@ -67,4 +71,6 @@ In the order the product notes prioritise validation:
 3. Cellular remote access without vendor servers, after the carrier and modem validation in
    [cellular-validation-plan.md](cellular-validation-plan.md).
 4. SMS alerts, reduced-power mode and power telemetry once the power path is measured.
-5. Encrypted local storage and customer-controlled off-site backup (ADR 0002).
+5. Encrypted local storage: controller side done (ADR 0003); next the app generates the device
+   and recovery keys, enrols them, and decrypts clips; then time-lapse frames. Customer-controlled
+   off-site backup uploads the same sealed files (ADR 0002).

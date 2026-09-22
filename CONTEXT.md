@@ -31,8 +31,12 @@ The single person with administrative authority over a system, including its set
 _Avoid_: Viewer, administrator account
 
 **Viewer**:
-A person invited by the owner to watch a system's live video and recordings, with individually revocable access and no administrative authority. Alert delivery and download/export permission are granted separately by the owner.
+A person invited by the owner to watch a system's live video and recordings, with individually revocable access and no administrative authority. Alert delivery and export permission are granted separately by the owner.
 _Avoid_: Owner, shared login
+
+**Export**:
+The owner deliberately copying footage out of Solstead's control, such as to the phone's photo library or through a share sheet. Exported copies cannot be retracted, protected, or encrypted by Solstead.
+_Avoid_: Download, which is fetching footage into the app to watch it
 
 **Protected clip**:
 An event recording the owner has selected to retain outside automatic overwrite, subject to the system's limited protected-storage allocation.
@@ -49,3 +53,15 @@ _Avoid_: Login, account
 **Owner token**:
 The random secret generated when a controller is provisioned and sent as a bearer token on every request. Possession of it is owner authority for the bench prototype.
 _Avoid_: Password, API key
+
+**Sealed recording**:
+A recording encrypted on the controller to the owner's public keys as it is written, in the age file format. Nothing on the controller can decrypt it; a device key or the recovery key can.
+_Avoid_: Encrypted backup, when meaning footage stored on the controller
+
+**Device key**:
+The private key a phone generates and keeps in its Keychain to open sealed recordings. Only its public half is sent to the controller.
+_Avoid_: Owner token (which authorizes requests but decrypts nothing)
+
+**Recovery key**:
+A private key generated during setup and saved by the owner outside the phone and controller, as printed text or a file. It opens every sealed recording and backup when all device keys are lost.
+_Avoid_: Password, backup code
