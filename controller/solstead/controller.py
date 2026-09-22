@@ -19,14 +19,15 @@ from .motion import MotionWatcher
 from .onvif import PullPointClient
 from .sdnotify import notify
 from .storage import Storage, StorageUnavailable
+from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
 
-THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
 BUFFER_FOLDER = "buffer"
 HEALTH_FILE = "health.jsonl"
 TICK_SECONDS = 0.5
 RETRY_SECONDS = 30
 STORAGE_CHECK_SECONDS = 5
+THERMAL_CHECK_SECONDS = 10
 CLOCK_SANITY_UNIX = 1767225600  # 2026-01-01: earlier than this and the clock is not set
 log = logging.getLogger("solstead")
 
@@ -90,6 +91,9 @@ class Controller:
         self._thread: threading.Thread | None = None
         self._last_attempt = 0.0
         self._last_storage_check = 0.0
+        self._last_thermal_check = 0.0
+        self.thermal = Thermal(temperature_c=None)
+        self.thermal_reader = read_thermal
         self._seen: dict = {
             "buffer_restarts": 0,
             "watcher_errors": 0,
@@ -132,6 +136,7 @@ class Controller:
         while not self._stop.is_set():
             notify("WATCHDOG=1")
             self._check_storage()
+            self._check_thermal()
             if self.config.events_enabled:
                 self._ensure_events()
             self._poll_incidents()
@@ -177,6 +182,34 @@ class Controller:
             self.health.record("info", "storage", "Recording storage is back")
             self.events_reason = None
             self._last_attempt = 0.0  # retry immediately
+
+    def _check_thermal(self) -> None:
+        """Read temperature and Pi power flags; log when they cross into or out of trouble."""
+        if time.monotonic() - self._last_thermal_check < THERMAL_CHECK_SECONDS:
+            return
+        self._last_thermal_check = time.monotonic()
+        before, now = self.thermal, self.thermal_reader()
+        self.thermal = now
+        temp = now.temperature_c
+        if now.undervoltage_now and not before.undervoltage_now:
+            self.health.record("error", "power", "Under-voltage: the Pi's supply is sagging")
+        elif before.undervoltage_now and not now.undervoltage_now:
+            self.health.record("info", "power", "Supply voltage back to normal")
+        if now.throttled_now and not before.throttled_now:
+            self.health.record("warning", "thermal", "CPU is being throttled", temperature_c=temp)
+        elif before.throttled_now and not now.throttled_now:
+            self.health.record("info", "thermal", "CPU throttling ended", temperature_c=temp)
+        if temp is not None and before.temperature_c is not None:
+            if temp >= now.throttle_c > before.temperature_c:
+                self.health.record(
+                    "error", "thermal", f"CPU at {temp} C, throttle limit", temperature_c=temp
+                )
+            elif temp >= now.warning_c > before.temperature_c:
+                self.health.record(
+                    "warning", "thermal", f"CPU at {temp} C, getting hot", temperature_c=temp
+                )
+            elif before.temperature_c >= now.warning_c > temp:
+                self.health.record("info", "thermal", f"CPU back to {temp} C", temperature_c=temp)
 
     def _ensure_events(self) -> None:
         """Start (or restart after the SSD returns) the buffer and motion watcher."""
@@ -233,13 +266,6 @@ class Controller:
 
     # ---- status --------------------------------------------------------------------------
 
-    @staticmethod
-    def cpu_temperature() -> float | None:
-        try:
-            return float(THERMAL_ZONE.read_text()) / 1000
-        except (OSError, ValueError):
-            return None
-
     def events_status(self) -> dict:
         status = {
             "enabled": self.config.events_enabled,
@@ -272,7 +298,8 @@ class Controller:
             "name": self.config.name,
             "version": __version__,
             "uptime_seconds": int(time.monotonic() - self.started),
-            "temperature_c": self.cpu_temperature(),
+            "temperature_c": self.thermal.temperature_c,
+            "thermal": self.thermal.to_dict(),
             "storage": self.storage.status(),
             "camera": {
                 "configured": self.camera.configured,

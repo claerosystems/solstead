@@ -42,6 +42,7 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let live: Live?
     public let timelapse: TimeLapseStatus?
     public let health: Health?
+    public let thermal: Thermal?
     public let recordingMode: String
     public let remoteAccess: Bool
 }
@@ -187,3 +188,19 @@ public struct HealthEntry: Decodable, Equatable, Identifiable, Sendable {
 }
 
 struct HealthList: Decodable { let entries: [HealthEntry] }
+
+extension ControllerStatus {
+    /// CPU temperature against the Pi's throttle thresholds, plus its power flags.
+    public struct Thermal: Decodable, Equatable, Sendable {
+        public let temperatureC: Double?
+        public let warningC: Double
+        public let throttleC: Double
+        public let flagsAvailable: Bool
+        public let undervoltageNow: Bool
+        public let throttledNow: Bool
+        public let undervoltageSinceBoot: Bool
+        public let throttledSinceBoot: Bool
+        /// good, warning or danger, computed by the controller.
+        public let level: String
+    }
+}

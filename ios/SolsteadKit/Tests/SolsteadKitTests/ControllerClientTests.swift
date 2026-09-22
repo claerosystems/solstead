@@ -157,6 +157,15 @@ final class ControllerClientTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), Data("mp4".utf8))
     }
 
+    func testThermalBlock() async throws {
+        let json = statusJSON.dropLast(1) + Data(#", "thermal": {"temperature_c": 76.5, "warning_c": 75.0, "throttle_c": 80.0, "flags_available": true, "undervoltage_now": false, "throttled_now": false, "undervoltage_since_boot": true, "throttled_since_boot": false, "level": "warning"}}"#.utf8)
+        transport.responses = [(200, Data(json))]
+        let thermal = try await client.status().thermal
+        XCTAssertEqual(thermal?.temperatureC, 76.5)
+        XCTAssertEqual(thermal?.level, "warning")
+        XCTAssertEqual(thermal?.undervoltageSinceBoot, true)
+    }
+
     func testHealthLogAndStatusBlock() async throws {
         transport.responses = [
             (200, Data(#"{"entries": [{"unix": 1790085605, "level": "warning", "kind": "camera", "message": "Camera stream ended; restarting the buffer", "restarts": 1}]}"#.utf8)),

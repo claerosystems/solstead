@@ -20,6 +20,7 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/timelapse.py` | Scheduled frames in their own allocation, day listing, MP4 export, owner-adjustable settings. |
 | `solstead/health.py` | Health log: incidents in memory and in `<storage>/health.jsonl`, capped. |
 | `solstead/sdnotify.py` | systemd readiness and watchdog pings without a dependency. |
+| `solstead/thermal.py` | CPU temperature against the Pi 4's throttle points and its under-voltage/throttle flags. |
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
 | `solstead/provisioning.py` | Generates the owner token, self-signed certificate and config. |
@@ -110,6 +111,11 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   and that is logged too. The health file itself is only written while the SSD is present.
 - **Clock.** A system time before 2026 means the clock is not set; the status flags it, and the
   controller will not push that time to the camera.
+- **Temperature and power.** Every ten seconds the controller reads the SoC temperature and
+  `vcgencmd get_throttled`. The Pi 4 caps its clock at 80 °C and throttles hard at 85 °C, so
+  75 °C is logged as a warning and 80 °C as an error; under-voltage and throttling are logged
+  when they begin and end. The status carries a `thermal` block with the reading, thresholds,
+  flags and a good/warning/danger level.
 - **Health log.** `GET /v1/health?level=info|warning|error&limit=N` returns incidents newest
   first (start, recording started/stopped, camera stream restarts, camera errors and recovery,
   storage lost/returned, events recorded, live view, time-lapse errors). The status carries a

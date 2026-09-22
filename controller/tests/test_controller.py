@@ -227,3 +227,34 @@ def test_incident_polling_reports_buffer_restarts(config, ffmpeg, tmp_path):
     assert entry["kind"] == "camera" and entry["restarts"] == 2 and entry["level"] == "warning"
     controller._poll_incidents()
     assert len(controller.health.recent()) == 1  # not repeated
+
+
+def test_thermal_transitions_are_logged(config, ffmpeg, tmp_path):
+    import time
+
+    from solstead.thermal import Thermal
+
+    controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg))
+    readings = iter([
+        Thermal(temperature_c=60.0, flags_available=True),
+        Thermal(temperature_c=76.0, flags_available=True),
+        Thermal(temperature_c=81.0, flags_available=True, throttled_now=True, throttled_since_boot=True),
+        Thermal(temperature_c=70.0, flags_available=True, throttled_since_boot=True, undervoltage_now=True),
+        Thermal(temperature_c=70.0, flags_available=True, throttled_since_boot=True),
+    ])  # fmt: skip
+    controller.thermal_reader = lambda: next(readings)
+    for _ in range(5):
+        controller._last_thermal_check = time.monotonic() - 100
+        controller._check_thermal()
+    messages = [(e["level"], e["kind"]) for e in reversed(controller.health.recent())]
+    assert messages == [
+        ("warning", "thermal"),  # 76 C
+        ("warning", "thermal"),  # throttling began
+        ("error", "thermal"),  # 81 C
+        ("error", "power"),  # under-voltage
+        ("info", "thermal"),  # throttling ended
+        ("info", "thermal"),  # back below 75 C
+        ("info", "power"),  # voltage back
+    ]
+    status = controller.status()
+    assert status["thermal"]["level"] == "warning" and status["temperature_c"] == 70.0

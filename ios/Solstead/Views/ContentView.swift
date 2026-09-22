@@ -234,7 +234,9 @@ struct HealthSection: View {
         if let events = status.events, events.enabled, !(events.running && events.bufferRunning && events.cameraSubscribed) {
             return .danger
         }
-        if (health?.lastDay.warning ?? 0) > 0 || status.events?.cameraError != nil || status.events?.lastError != nil {
+        if status.thermal?.level == "danger" { return .danger }
+        if (health?.lastDay.warning ?? 0) > 0 || status.events?.cameraError != nil || status.events?.lastError != nil
+            || status.thermal?.level == "warning" {
             return .warning
         }
         return .good
@@ -248,7 +250,17 @@ struct HealthSection: View {
                 LabeledContent("Software", value: status.version)
                 LabeledContent("Uptime", value: Duration.seconds(status.uptimeSeconds).formatted(.units(allowed: [.days, .hours, .minutes], width: .abbreviated)))
                 if let temperature = status.temperatureC {
-                    LabeledContent("CPU temperature", value: String(format: "%.1f °C", temperature))
+                    LabeledContent("CPU temperature", value: String(format: "%.1f °C", temperature) + thermalNote)
+                        .foregroundStyle(thermalColour)
+                }
+                if let thermal = status.thermal, thermal.flagsAvailable {
+                    LabeledContent("Power supply", value: thermal.undervoltageNow ? "Under-voltage now"
+                        : thermal.undervoltageSinceBoot ? "Under-voltage since boot" : "OK")
+                        .foregroundStyle(thermal.undervoltageNow ? .red : thermal.undervoltageSinceBoot ? .orange : .primary)
+                    if thermal.throttledNow || thermal.throttledSinceBoot {
+                        LabeledContent("CPU throttling", value: thermal.throttledNow ? "Now" : "Happened since boot")
+                            .foregroundStyle(thermal.throttledNow ? .red : .orange)
+                    }
                 }
                 LabeledContent("Storage", value: status.storage.ready ? "Ready" : "Unavailable")
                 if let free = status.storage.freeBytes, let total = status.storage.totalBytes {
@@ -284,6 +296,21 @@ struct HealthSection: View {
                     Text(condition.label).foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var thermalNote: String {
+        guard let thermal = status.thermal, let temperature = thermal.temperatureC else { return "" }
+        if temperature >= thermal.throttleC { return " (throttling)" }
+        if temperature >= thermal.warningC { return String(format: " (throttles at %.0f °C)", thermal.throttleC) }
+        return ""
+    }
+
+    private var thermalColour: Color {
+        switch status.thermal?.level {
+        case "danger": return .red
+        case "warning": return .orange
+        default: return .primary
         }
     }
 
