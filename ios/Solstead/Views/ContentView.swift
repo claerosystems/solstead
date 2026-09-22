@@ -26,6 +26,9 @@ struct ContentView: View {
             .sheet(item: $model.playingClip) { clip in
                 ClipPlayerView(clip: clip)
             }
+            .sheet(item: $model.liveSession, onDismiss: { model.stopLive() }) { session in
+                LiveView(session: session)
+            }
             .navigationTitle("Solstead")
             .toolbar {
                 if model.isConnected {
@@ -103,11 +106,13 @@ struct CameraSection: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("Latest requested camera snapshot")
             }
+            Button("View live", systemImage: "video") { Task { await model.startLive() } }
+                .disabled(!(status.live?.available ?? status.camera.configured))
             Button("Take snapshot", systemImage: "camera") { Task { await model.takeSnapshot() } }
                 .disabled(!status.camera.configured)
             Button("Record 10-second test clip", systemImage: "record.circle") { Task { await model.recordTestClip() } }
                 .disabled(!status.camera.configured || !status.storage.ready)
-            Text("Manual test recording. Live video is coming next.")
+            Text("Manual test recording from the buffered stream.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -182,6 +187,66 @@ struct ClipPlayerView: View {
                 }
                 .onDisappear { player?.pause() }
         }
+    }
+}
+
+struct LiveView: View {
+    @EnvironmentObject private var model: ControllerModel
+    @Environment(\.dismiss) private var dismiss
+    let session: LiveSession
+    @State private var player: AVPlayer?
+    @State private var firstFrameSeconds: Double?
+    @State private var observer: NSKeyValueObservation?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea(edges: .bottom)
+                if firstFrameSeconds == nil {
+                    ProgressView().controlSize(.large)
+                }
+            }
+            .navigationTitle("Live")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Done") { dismiss() } }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 6) {
+                    Picker("Quality", selection: Binding(
+                        get: { session.quality },
+                        set: { quality in Task { await model.startLive(quality: quality) } }
+                    )) {
+                        ForEach(LiveQuality.allCases, id: \.self) { Text($0.label + " quality").tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    Text(firstFrameSeconds.map { String(format: "First frame after %.1f s", $0) } ?? "Connecting…")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+                .background(.bar)
+            }
+            .onAppear(perform: start)
+            .onChange(of: session.requestedAt) { _, _ in start() }
+            .onDisappear { observer = nil; player?.pause() }
+        }
+    }
+
+    private func start() {
+        observer = nil
+        player?.pause()
+        firstFrameSeconds = nil
+        // A fresh URL each time: the playlist is the same but AVPlayer must not reuse old segments.
+        let player = AVPlayer(url: session.proxy.playlistURL)
+        self.player = player
+        observer = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+            if player.timeControlStatus == .playing, firstFrameSeconds == nil {
+                DispatchQueue.main.async {
+                    firstFrameSeconds = Date().timeIntervalSince(session.requestedAt)
+                }
+            }
+        }
+        player.play()
     }
 }
 

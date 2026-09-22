@@ -58,6 +58,21 @@ public struct ControllerClient: Sendable {
         try await request("v1/camera/snapshot")
     }
 
+    /// Starts live view (or switches quality). The controller answers once the first
+    /// segments exist, which can take several seconds.
+    public func startLive(quality: LiveQuality = .low) async throws -> LiveInfo {
+        try decode(LiveInfo.self, from: await request("v1/live?quality=\(quality.rawValue)", method: "POST"))
+    }
+
+    public func stopLive() async throws {
+        _ = try await request("v1/live", method: "DELETE")
+    }
+
+    /// Fetches a live playlist or segment by file name through the pinned session.
+    public func liveResource(_ name: String) async throws -> Data {
+        try await request("v1/live/" + name)
+    }
+
     public func events() async throws -> [Event] {
         try decode(EventList.self, from: await request("v1/events")).events
     }
@@ -81,7 +96,13 @@ public struct ControllerClient: Sendable {
     // MARK: - Internals
 
     func makeRequest(_ path: String, method: String) -> URLRequest {
-        var request = URLRequest(url: pairing.url.appendingPathComponent(path))
+        let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
+        var url = pairing.url.appendingPathComponent(parts[0])
+        if parts.count == 2, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.percentEncodedQuery = parts[1]
+            url = components.url ?? url
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer " + pairing.token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json, image/jpeg", forHTTPHeaderField: "Accept")

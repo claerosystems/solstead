@@ -108,6 +108,29 @@ final class ControllerClientTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    func testLiveStartStopAndResources() async throws {
+        transport.responses = [
+            (200, Data(#"{"available": true, "active": true, "quality": "high", "ready": true, "playlist": "/v1/live/index.m3u8"}"#.utf8)),
+            (200, Data("#EXTM3U\n".utf8)),
+            (200, Data(#"{"active": false}"#.utf8)),
+        ]
+        let info = try await client.startLive(quality: .high)
+        XCTAssertEqual(info.quality, "high")
+        XCTAssertEqual(transport.requests[0].httpMethod, "POST")
+        XCTAssertEqual(transport.requests[0].url?.absoluteString, "https://solstead.local:8443/v1/live?quality=high")
+        let playlist = try await client.liveResource("index.m3u8")
+        XCTAssertEqual(String(decoding: playlist, as: UTF8.self), "#EXTM3U\n")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v1/live/index.m3u8")
+        try await client.stopLive()
+        XCTAssertEqual(transport.requests[2].httpMethod, "DELETE")
+    }
+
+    func testStatusLiveBlockIsOptional() async throws {
+        transport.responses = [(200, statusJSON)]
+        let status = try await client.status()
+        XCTAssertNil(status.live)
+    }
+
     func testSnapshotReturnsRawBytes() async throws {
         transport.responses = [(200, Data([0xFF, 0xD8, 0x01]))]
         let data = try await client.snapshot()

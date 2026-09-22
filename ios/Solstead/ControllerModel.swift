@@ -15,6 +15,7 @@ final class ControllerModel: ObservableObject {
     @Published private(set) var recordings: [Recording] = []
     @Published private(set) var events: [Event] = []
     @Published var playingClip: PlayableClip?
+    @Published var liveSession: LiveSession?
     @Published private(set) var snapshot: UIImage?
     @Published private(set) var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
@@ -57,6 +58,30 @@ final class ControllerModel: ObservableObject {
             events = []
             snapshot = nil
         }
+    }
+
+    func startLive(quality: LiveQuality = .low) async {
+        await perform {
+            let client = try connected()
+            message = "Starting live view…"
+            let started = Date()
+            let info = try await client.startLive(quality: quality)
+            let proxy: LiveProxy
+            if let existing = liveSession?.proxy {
+                proxy = existing
+            } else {
+                proxy = try LiveProxy(client: client)
+                try await proxy.start()
+            }
+            liveSession = LiveSession(quality: quality, info: info, proxy: proxy, requestedAt: started)
+            message = "Live view running (\(quality.label.lowercased()) quality)."
+        }
+    }
+
+    func stopLive() {
+        liveSession?.proxy.stop()
+        liveSession = nil
+        Task { try? await client?.stopLive() }
     }
 
     func play(_ event: Event) async {
@@ -153,4 +178,12 @@ struct PlayableClip: Identifiable {
     let event: Event
     let url: URL
     var id: String { event.id }
+}
+
+struct LiveSession: Identifiable {
+    let quality: LiveQuality
+    let info: LiveInfo
+    let proxy: LiveProxy
+    let requestedAt: Date
+    var id: String { "live" }  // one sheet; quality changes update it in place
 }

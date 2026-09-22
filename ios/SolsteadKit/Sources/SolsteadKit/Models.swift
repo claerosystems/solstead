@@ -39,8 +39,34 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let storage: Storage
     public let camera: Camera
     public let events: Events?
+    public let live: Live?
     public let recordingMode: String
     public let remoteAccess: Bool
+}
+
+extension ControllerStatus {
+    /// Live view state; absent from controllers older than 0.3.
+    public struct Live: Decodable, Equatable, Sendable {
+        public let available: Bool
+        public let active: Bool
+        public let quality: String?
+        public let startedUnix: Int?
+        public let ready: Bool
+    }
+}
+
+/// Reply to `POST /v1/live`: the stream is running and the playlist can be fetched.
+public struct LiveInfo: Decodable, Equatable, Sendable {
+    public let available: Bool
+    public let active: Bool
+    public let quality: String?
+    public let ready: Bool
+    public let playlist: String
+}
+
+public enum LiveQuality: String, CaseIterable, Sendable {
+    case low, high
+    public var label: String { self == .low ? "Low" : "Full" }
 }
 
 /// One motion-triggered event clip: pre-roll, the activity, and post-roll.
