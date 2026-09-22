@@ -6,6 +6,9 @@ export DEVELOPER_DIR ?= $(XCODE_APP)/Contents/Developer
 endif
 PY := controller/.venv/bin
 SIM_DEST ?= generic/platform=iOS Simulator
+# Some third-party `make` binaries are x86_64 and run children under Rosetta; Swift tests must
+# run natively, so detect Apple silicon via sysctl rather than uname (which lies under Rosetta).
+NATIVE := $(shell [ "$$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && echo arch -arm64)
 
 .PHONY: help controller-setup controller-lint controller-test ios-test ios-build test clean
 
@@ -25,10 +28,10 @@ controller-test: controller-lint ## Lint then run the controller test suite
 	cd controller && .venv/bin/pytest
 
 ios-test: ## Run SolsteadKit unit tests on macOS
-	cd ios/SolsteadKit && swift test
+	cd ios/SolsteadKit && $(NATIVE) swift test
 
 ios-build: ## Build the iOS app for the simulator without signing
-	xcodebuild -project ios/Solstead.xcodeproj -scheme Solstead -destination '$(SIM_DEST)' \
+	$(NATIVE) xcodebuild -project ios/Solstead.xcodeproj -scheme Solstead -destination '$(SIM_DEST)' \
 		-derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO build | grep -E 'error:|warning:|BUILD' || true
 	@test -d .build/DerivedData/Build/Products/Debug-iphonesimulator/Solstead.app
 

@@ -26,6 +26,11 @@ and the ADRs under [adr/](adr/).
 - The pairing lives in the phone's Keychain, marked device-only so it is never synced or backed up.
 - Recording writes only to the mounted SSD. If the SSD is missing the controller reports it and
   refuses to record rather than filling the OS card.
+- Live view is on demand: the controller copies the camera's substream into one-second HLS
+  segments in RAM only while a phone is watching, and stops 20 seconds after the last request.
+  The app plays it with AVPlayer through a loopback proxy inside the app, because AVPlayer's own
+  networking cannot use the pinned session; the proxy fetches every segment through it. A
+  full-quality option switches to the main stream.
 - Event recording follows the accepted defaults: a clip starts 10 seconds before the first
   detected activity and ends 30 seconds after the last. The camera's own motion detection is the
   trigger, delivered over ONVIF; the controller does no image analysis. The last minute of the
@@ -53,7 +58,8 @@ In the order the product notes prioritise validation:
 
 1. Validate event recording against the real VIGI S445: ONVIF topic names, the RTSP substream,
    H.265 handling in the MP4 container, and the time-lapse allocation alongside events.
-2. Live view over the local network (low-resolution by default).
+2. Live view over cellular reuses the same HLS path; measure data use per minute and the
+   time-to-first-frame target with the VPN in place.
 3. Cellular remote access without vendor servers, after the carrier and modem validation in
    [cellular-validation-plan.md](cellular-validation-plan.md).
 4. SMS alerts, reduced-power mode and power telemetry once the power path is measured.
