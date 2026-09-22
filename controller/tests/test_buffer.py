@@ -125,3 +125,12 @@ def test_prune_respects_hold_from(tmp_path):
     assert not old.exists() and held.exists()
     buffer.hold_from = None
     assert buffer.prune(now) == 1 and not held.exists()
+
+
+def test_typical_segment_seconds_uses_measured_length(tmp_path):
+    base = int(time.time()) - 100
+    buffer = SegmentBuffer("rtsp://cam/1", tmp_path, segment_seconds=2)
+    assert buffer.typical_segment_seconds() == 2.0
+    for offset in range(0, 60, 12):
+        make_segment(tmp_path, base + offset, duration=12)
+    assert buffer.typical_segment_seconds() == 12.0

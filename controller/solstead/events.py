@@ -192,7 +192,8 @@ class EventRecorder:
             clip_to = last + self.post_seconds
             # Wait until the segment containing clip_to has been closed; if the buffer stalled,
             # give up a little later and take whatever footage exists.
-            if self.buffer.covers(clip_to) or now >= clip_to + 2 * self.buffer.segment_seconds + 5:
+            grace = 2 * self.buffer.typical_segment_seconds() + 5
+            if self.buffer.covers(clip_to) or now >= clip_to + grace:
                 event = self._assemble(started, last, trigger, now)
                 if event:
                     finished.append(event)

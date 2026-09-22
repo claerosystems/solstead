@@ -34,7 +34,9 @@ MEDIA = "http://www.onvif.org/ver10/media/wsdl"
 EVENTS = "http://www.onvif.org/ver10/events/wsdl"
 
 
-def call(url: str, user: str, password: str, namespace: str, name: str, body_xml: str = "") -> ET.Element:
+def call(
+    url: str, user: str, password: str, namespace: str, name: str, body_xml: str = ""
+) -> ET.Element:
     action = f"{namespace}/{name}"
     body = f'<tns:{name} xmlns:tns="{namespace}">{body_xml}</tns:{name}>'
     response = default_poster(url, envelope(action, url, body, username_token(user, password)), 15)
@@ -51,7 +53,9 @@ def text(element: ET.Element | None, name: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("service_url")
     parser.add_argument("user")
     parser.add_argument("password")
@@ -70,7 +74,14 @@ def main() -> int:
     media_url = url
     events_url = url
     try:
-        services = call(url, user, password, DEVICE, "GetServices", "<tns:IncludeCapability>false</tns:IncludeCapability>")
+        services = call(
+            url,
+            user,
+            password,
+            DEVICE,
+            "GetServices",
+            "<tns:IncludeCapability>false</tns:IncludeCapability>",
+        )
         print("== Services ==")
         for service in services.iter():
             if local(service.tag) == "Service":
@@ -93,8 +104,16 @@ def main() -> int:
             video = find_local(profile, "VideoEncoderConfiguration")
             encoding = text(video, "Encoding")
             resolution = find_local(video, "Resolution") if video is not None else None
-            size = f"{text(resolution, 'Width')}x{text(resolution, 'Height')}" if resolution is not None else "?"
-            rate = text(find_local(video, "RateControl"), "FrameRateLimit") if video is not None else ""
+            size = (
+                f"{text(resolution, 'Width')}x{text(resolution, 'Height')}"
+                if resolution is not None
+                else "?"
+            )
+            rate = (
+                text(find_local(video, "RateControl"), "FrameRateLimit")
+                if video is not None
+                else ""
+            )
             try:
                 uri_response = call(
                     media_url, user, password, MEDIA, "GetStreamUri",
@@ -105,7 +124,9 @@ def main() -> int:
                 uri = text(uri_response, "Uri")
             except OnvifError as error:
                 uri = f"(GetStreamUri failed: {error})"
-            print(f"  {text(profile, 'Name') or token:20} {encoding:6} {size:10} {rate:>3} fps  {uri}")
+            print(
+                f"  {text(profile, 'Name') or token:20} {encoding:6} {size:10} {rate:>3} fps  {uri}"
+            )
     except OnvifError as error:
         print(f"  GetProfiles failed: {error}")
 
@@ -118,7 +139,11 @@ def main() -> int:
             for child in element:
                 name = local(child.tag)
                 if name == "MessageDescription":
-                    items = [f"{i.get('Name')}:{i.get('Type', '').rsplit(':', 1)[-1]}" for i in child.iter() if local(i.tag) == "SimpleItemDescription"]
+                    items = [
+                        f"{i.get('Name')}:{i.get('Type', '').rsplit(':', 1)[-1]}"
+                        for i in child.iter()
+                        if local(i.tag) == "SimpleItemDescription"
+                    ]
                     print(f"  {'/'.join(path):55} {' '.join(items)}")
                 elif child.get("topic") == "true" or len(child):
                     walk(child, path + [name])
@@ -139,7 +164,9 @@ def main() -> int:
             while time.time() < deadline:
                 client.renew_if_due()
                 for event in client.pull(5):
-                    print(f"  {time.strftime('%H:%M:%S', time.localtime(event.at))} {event.topic:55} active={event.active} ({event.operation})")
+                    print(
+                        f"  {time.strftime('%H:%M:%S', time.localtime(event.at))} {event.topic:55} active={event.active} ({event.operation})"
+                    )
         except OnvifError as error:
             print(f"  failed: {error}")
         finally:

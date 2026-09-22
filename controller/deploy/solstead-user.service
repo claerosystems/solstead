@@ -1,0 +1,13 @@
+# User-level unit: ~/.config/systemd/user/solstead.service (no root required; needs linger).
+[Unit]
+Description=Solstead controller (user service)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/solstead/controller/.venv/bin/solstead serve %h/.config/solstead/config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

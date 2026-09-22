@@ -148,6 +148,15 @@ class SegmentBuffer:
             segments = segments[:-1]
         return [s for s in segments if s.overlaps(start, end)]
 
+    def typical_segment_seconds(self) -> float:
+        """Observed segment length: cameras with long GOPs produce longer segments than asked."""
+        segments = self.segments()
+        if self.running and segments:
+            segments = segments[:-1]
+        durations = sorted(s.end - s.start for s in segments[-5:] if s.end > s.start)
+        measured = durations[len(durations) // 2] if durations else 0.0
+        return max(float(self.segment_seconds), measured)
+
     def covers(self, until: float) -> bool:
         """True once a segment has started at or after `until`, so earlier ones are complete."""
         newest = self.newest_start()
