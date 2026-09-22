@@ -40,6 +40,7 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let camera: Camera
     public let events: Events?
     public let live: Live?
+    public let timelapse: TimeLapseStatus?
     public let recordingMode: String
     public let remoteAccess: Bool
 }
@@ -104,5 +105,56 @@ public enum ControllerJSON {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return decoder
+    }()
+}
+
+/// Time-lapse state and settings, from the status block or `GET /v1/timelapse` (which adds days).
+public struct TimeLapseStatus: Decodable, Equatable, Sendable {
+    public let enabled: Bool
+    public let intervalSeconds: Int
+    public let window: String
+    public let width: Int
+    public let allocationBytes: Int64
+    public let exportFps: Int
+    public let dayCount: Int
+    public let frames: Int
+    public let usedBytes: Int64
+    public let framesPerDay: Int
+    public let estimatedRetentionDays: Int?
+    public let oldestDate: String?
+    public let newestUnix: Int?
+    public let lastError: String?
+    public let days: [TimeLapseDay]?
+
+    /// "06:00-18:00" split into its two halves.
+    public var windowStart: String { String(window.split(separator: "-").first ?? "06:00") }
+    public var windowEnd: String { String(window.split(separator: "-").last ?? "18:00") }
+}
+
+public struct TimeLapseDay: Decodable, Equatable, Identifiable, Sendable {
+    public let date: String
+    public let frames: Int
+    public let bytes: Int64
+    public var id: String { date }
+}
+
+/// Fields the owner may change; nil leaves a setting as it is.
+public struct TimeLapseSettingsUpdate: Encodable, Equatable, Sendable {
+    public var enabled: Bool?
+    public var intervalSeconds: Int?
+    public var window: String?
+
+    public init(enabled: Bool? = nil, intervalSeconds: Int? = nil, window: String? = nil) {
+        self.enabled = enabled
+        self.intervalSeconds = intervalSeconds
+        self.window = window
+    }
+}
+
+public enum ControllerJSONEncoder {
+    public static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return encoder
     }()
 }

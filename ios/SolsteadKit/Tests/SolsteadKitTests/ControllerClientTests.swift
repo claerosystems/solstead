@@ -131,6 +131,32 @@ final class ControllerClientTests: XCTestCase {
         XCTAssertNil(status.live)
     }
 
+    func testTimelapseStatusUpdateAndVideo() async throws {
+        let statusJSON = #"{"enabled": true, "interval_seconds": 300, "window": "06:00-18:00", "width": 1920, "allocation_bytes": 4294967296, "export_fps": 12, "day_count": 1, "frames": 3, "used_bytes": 300000, "frames_per_day": 144, "estimated_retention_days": 200, "oldest_date": "2026-09-22", "newest_unix": 1790085605, "last_error": null, "days": [{"date": "2026-09-22", "frames": 3, "bytes": 300000}]}"#
+        transport.responses = [
+            (200, Data(statusJSON.utf8)),
+            (200, Data(statusJSON.replacingOccurrences(of: "\"interval_seconds\": 300", with: "\"interval_seconds\": 60").utf8)),
+            (200, Data("mp4".utf8)),
+        ]
+        let status = try await client.timelapse()
+        XCTAssertEqual(status.days?.first?.frames, 3)
+        XCTAssertEqual(status.windowStart, "06:00")
+        XCTAssertEqual(status.windowEnd, "18:00")
+        XCTAssertEqual(status.estimatedRetentionDays, 200)
+        let updated = try await client.updateTimelapse(TimeLapseSettingsUpdate(intervalSeconds: 60, window: "07:00-17:00"))
+        XCTAssertEqual(updated.intervalSeconds, 60)
+        let put = transport.requests[1]
+        XCTAssertEqual(put.httpMethod, "PUT")
+        XCTAssertEqual(put.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let sent = try XCTUnwrap(put.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(sent["interval_seconds"] as? Int, 60)
+        XCTAssertEqual(sent["window"] as? String, "07:00-17:00")
+        XCTAssertNil(sent["enabled"])
+        let url = try await client.downloadTimelapseVideo(day: "2026-09-22")
+        XCTAssertEqual(transport.requests[2].url?.path, "/v1/timelapse/2026-09-22/video.mp4")
+        XCTAssertEqual(try Data(contentsOf: url), Data("mp4".utf8))
+    }
+
     func testSnapshotReturnsRawBytes() async throws {
         transport.responses = [(200, Data([0xFF, 0xD8, 0x01]))]
         let data = try await client.snapshot()

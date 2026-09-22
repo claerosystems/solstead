@@ -14,8 +14,10 @@ final class ControllerModel: ObservableObject {
     @Published private(set) var status: ControllerStatus?
     @Published private(set) var recordings: [Recording] = []
     @Published private(set) var events: [Event] = []
+    @Published private(set) var timelapse: TimeLapseStatus?
     @Published var playingClip: PlayableClip?
     @Published var liveSession: LiveSession?
+    @Published var showSettings = false
     @Published private(set) var snapshot: UIImage?
     @Published private(set) var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
@@ -29,7 +31,10 @@ final class ControllerModel: ObservableObject {
             url = saved.url.absoluteString
             token = saved.token
             fingerprint = saved.fingerprint
-        } else if let bench = BenchPairing.fromEnvironment() {
+        } else if BenchPairing.fromEnvironment() == nil {
+            showSettings = true  // nothing paired yet: start on the settings pane
+        }
+        if PairingStore.load() == nil, let bench = BenchPairing.fromEnvironment() {
             // Debug builds only: scripts/bench-controller.sh prints these values.
             url = bench.url
             token = bench.token
@@ -56,7 +61,24 @@ final class ControllerModel: ObservableObject {
             status = nil
             recordings = []
             events = []
+            timelapse = nil
             snapshot = nil
+        }
+    }
+
+    func updateTimelapse(_ update: TimeLapseSettingsUpdate) async {
+        await perform {
+            timelapse = try await connected().updateTimelapse(update)
+            message = "Time-lapse settings saved on the controller."
+        }
+    }
+
+    func playTimelapse(_ day: TimeLapseDay) async {
+        await perform {
+            message = "Assembling and downloading the \(day.date) time-lapse…"
+            let url = try await connected().downloadTimelapseVideo(day: day.date)
+            playingClip = PlayableClip(title: "Time-lapse \(day.date)", url: url)
+            message = "Playing time-lapse for \(day.date)."
         }
     }
 
@@ -88,7 +110,7 @@ final class ControllerModel: ObservableObject {
         await perform {
             message = "Downloading \(ByteCountFormatter.string(fromByteCount: event.sizeBytes, countStyle: .file)) clip…"
             let url = try await connected().downloadEventClip(event)
-            playingClip = PlayableClip(event: event, url: url)
+            playingClip = PlayableClip(title: event.started.formatted(date: .abbreviated, time: .shortened), url: url)
             message = "Playing event from \(event.started.formatted(date: .abbreviated, time: .shortened))."
         }
     }
@@ -99,6 +121,7 @@ final class ControllerModel: ObservableObject {
         status = nil
         recordings = []
         events = []
+        timelapse = nil
         snapshot = nil
         token = ""
         fingerprint = ""
@@ -143,9 +166,11 @@ final class ControllerModel: ObservableObject {
         // A missing SSD must still be visible on the health screen, so don't fail on listings.
         let clips = newStatus.storage.ready ? try await client.recordings() : []
         let eventClips = newStatus.storage.ready && newStatus.events?.enabled == true ? try await client.events() : []
+        let lapse = newStatus.storage.ready && newStatus.camera.configured ? try? await client.timelapse() : nil
         status = newStatus
         recordings = clips
         events = eventClips
+        timelapse = lapse
     }
 
     private func perform(_ work: () async throws -> Void, onFailure: () -> Void = {}) async {
@@ -175,9 +200,9 @@ enum BenchPairing {
 }
 
 struct PlayableClip: Identifiable {
-    let event: Event
+    let title: String
     let url: URL
-    var id: String { event.id }
+    var id: String { url.absoluteString }
 }
 
 struct LiveSession: Identifiable {

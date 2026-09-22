@@ -8,10 +8,12 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Form {
-                PairingSection()
                 Section {
                     Text(model.message).font(.callout)
                     if model.busy { ProgressView() }
+                    if !model.isConnected {
+                        Button("Open settings to connect", systemImage: "gearshape") { model.showSettings = true }
+                    }
                 }
                 if let status = model.status {
                     HealthSection(status: status)
@@ -19,10 +21,14 @@ struct ContentView: View {
                         EventsSection(events: events)
                     }
                     CameraSection(status: status)
+                    if let lapse = model.timelapse {
+                        TimeLapseSection(lapse: lapse)
+                    }
                     RecordingsSection()
                 }
             }
             .disabled(model.busy)
+            .sheet(isPresented: $model.showSettings) { SettingsView() }
             .sheet(item: $model.playingClip) { clip in
                 ClipPlayerView(clip: clip)
             }
@@ -31,10 +37,134 @@ struct ContentView: View {
             }
             .navigationTitle("Solstead")
             .toolbar {
-                if model.isConnected {
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if model.isConnected {
+                        Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+                    }
+                    Button("Settings", systemImage: "gearshape") { model.showSettings = true }
                 }
             }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @EnvironmentObject private var model: ControllerModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                PairingSection()
+                if let lapse = model.timelapse {
+                    TimeLapseSettingsSection(lapse: lapse)
+                }
+                Section("About") {
+                    LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
+                    if let status = model.status {
+                        LabeledContent("Controller software", value: status.version)
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Done") { dismiss() } }
+            .disabled(model.busy)
+        }
+    }
+}
+
+struct TimeLapseSettingsSection: View {
+    @EnvironmentObject private var model: ControllerModel
+    let lapse: TimeLapseStatus
+    static let intervals = [60, 120, 300, 600, 900, 1800, 3600]
+
+    var body: some View {
+        Section {
+            Toggle("Capture time-lapse", isOn: Binding(
+                get: { lapse.enabled },
+                set: { on in Task { await model.updateTimelapse(TimeLapseSettingsUpdate(enabled: on)) } }
+            ))
+            Picker("Every", selection: Binding(
+                get: { lapse.intervalSeconds },
+                set: { seconds in Task { await model.updateTimelapse(TimeLapseSettingsUpdate(intervalSeconds: seconds)) } }
+            )) {
+                ForEach(Self.intervals, id: \.self) { seconds in
+                    Text(seconds < 3600 ? "\(seconds / 60) min" : "1 hour").tag(seconds)
+                }
+                if !Self.intervals.contains(lapse.intervalSeconds) {
+                    Text("\(lapse.intervalSeconds) s").tag(lapse.intervalSeconds)
+                }
+            }
+            DatePicker("From", selection: windowBinding(start: true), displayedComponents: .hourAndMinute)
+            DatePicker("Until", selection: windowBinding(start: false), displayedComponents: .hourAndMinute)
+            LabeledContent("Frames per day", value: "\(lapse.framesPerDay)")
+            if let days = lapse.estimatedRetentionDays {
+                LabeledContent("Estimated history", value: "about \(days) days")
+            }
+        } header: {
+            Text("Time-lapse")
+        } footer: {
+            Text("Frames use their own \(ByteCountFormatter.string(fromByteCount: lapse.allocationBytes, countStyle: .file)) allocation on the controller; the oldest are overwritten when it fills. Changing the interval changes how many days fit.")
+        }
+    }
+
+    private func windowBinding(start: Bool) -> Binding<Date> {
+        Binding(
+            get: { Self.date(from: start ? lapse.windowStart : lapse.windowEnd) },
+            set: { date in
+                let text = Self.text(from: date)
+                let window = start ? "\(text)-\(lapse.windowEnd)" : "\(lapse.windowStart)-\(text)"
+                Task { await model.updateTimelapse(TimeLapseSettingsUpdate(window: window)) }
+            }
+        )
+    }
+
+    static func date(from hhmm: String) -> Date {
+        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
+        return Calendar.current.date(bySettingHour: parts.first ?? 0, minute: parts.count > 1 ? parts[1] : 0, second: 0, of: Date()) ?? Date()
+    }
+
+    static func text(from date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+    }
+}
+
+struct TimeLapseSection: View {
+    @EnvironmentObject private var model: ControllerModel
+    let lapse: TimeLapseStatus
+
+    var body: some View {
+        Section {
+            LabeledContent("Captures", value: lapse.enabled ? "every \(lapse.intervalSeconds / 60) min, \(lapse.windowStart)–\(lapse.windowEnd)" : "Off")
+            LabeledContent("Stored", value: "\(lapse.frames) frames over \(lapse.dayCount) days, \(ByteCountFormatter.string(fromByteCount: lapse.usedBytes, countStyle: .file))")
+            if let days = lapse.estimatedRetentionDays {
+                LabeledContent("Estimated history", value: "about \(days) days")
+            }
+            if let error = lapse.lastError {
+                Text(error).foregroundStyle(.red).font(.callout)
+            }
+            ForEach(lapse.days ?? []) { day in
+                Button {
+                    Task { await model.playTimelapse(day) }
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(day.date)
+                            Text("\(day.frames) frames, \(ByteCountFormatter.string(fromByteCount: day.bytes, countStyle: .file))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "play.circle")
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+        } header: {
+            Text("Time-lapse")
+        } footer: {
+            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second. Adjust the schedule in Settings.")
         }
     }
 }
@@ -54,6 +184,9 @@ struct PairingSection: View {
             Button("Connect securely") { Task { await model.connect() } }
             if model.isConnected {
                 Button("Forget this controller", role: .destructive) { model.forget() }
+            }
+            if !model.message.isEmpty {
+                Text(model.message).font(.callout).foregroundStyle(.secondary)
             }
         } header: {
             Text("Your controller")
@@ -177,7 +310,7 @@ struct ClipPlayerView: View {
         NavigationStack {
             VideoPlayer(player: player)
                 .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(clip.event.started.formatted(date: .abbreviated, time: .shortened))
+                .navigationTitle(clip.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Done") { dismiss() } }
                 .onAppear {

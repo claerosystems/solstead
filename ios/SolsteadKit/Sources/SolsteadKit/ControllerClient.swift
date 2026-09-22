@@ -73,6 +73,21 @@ public struct ControllerClient: Sendable {
         try await request("v1/live/" + name)
     }
 
+    public func timelapse() async throws -> TimeLapseStatus {
+        try decode(TimeLapseStatus.self, from: await request("v1/timelapse"))
+    }
+
+    public func updateTimelapse(_ update: TimeLapseSettingsUpdate) async throws -> TimeLapseStatus {
+        let body = try ControllerJSONEncoder.encoder.encode(update)
+        return try decode(TimeLapseStatus.self, from: await request("v1/timelapse", method: "PUT", body: body))
+    }
+
+    /// Downloads a day's time-lapse video (assembled by the controller) to a temporary file.
+    public func downloadTimelapseVideo(day: String) async throws -> URL {
+        let data = try await request("v1/timelapse/\(day)/video.mp4")
+        return try writeTemporary(data, name: "timelapse-\(day).mp4")
+    }
+
     public func events() async throws -> [Event] {
         try decode(EventList.self, from: await request("v1/events")).events
     }
@@ -80,10 +95,13 @@ public struct ControllerClient: Sendable {
     /// Downloads an event clip to a temporary file and returns its URL. AVPlayer cannot use the
     /// pinned session directly, so clips are fetched through it and played from disk.
     public func downloadEventClip(_ event: Event) async throws -> URL {
-        let data = try await request("v1/events/\(event.id)/clip")
+        try writeTemporary(try await request("v1/events/\(event.id)/clip"), name: event.id + ".mp4")
+    }
+
+    private func writeTemporary(_ data: Data, name: String) throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("solstead-clips", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(event.id + ".mp4")
+        let url = folder.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
         return url
     }
@@ -95,7 +113,7 @@ public struct ControllerClient: Sendable {
 
     // MARK: - Internals
 
-    func makeRequest(_ path: String, method: String) -> URLRequest {
+    func makeRequest(_ path: String, method: String, body: Data? = nil) -> URLRequest {
         let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
         var url = pairing.url.appendingPathComponent(parts[0])
         if parts.count == 2, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
@@ -106,11 +124,15 @@ public struct ControllerClient: Sendable {
         request.httpMethod = method
         request.setValue("Bearer " + pairing.token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json, image/jpeg", forHTTPHeaderField: "Accept")
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         return request
     }
 
-    private func request(_ path: String, method: String = "GET") async throws -> Data {
-        let (data, response) = try await transport.send(makeRequest(path, method: method))
+    private func request(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+        let (data, response) = try await transport.send(makeRequest(path, method: method, body: body))
         guard let http = response as? HTTPURLResponse else { throw ControllerError.unexpectedResponse(status: 0) }
         guard (200..<300).contains(http.statusCode) else {
             if let body = try? ControllerJSON.decoder.decode(ErrorBody.self, from: data) {
