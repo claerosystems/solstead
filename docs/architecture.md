@@ -1,19 +1,21 @@
 # Architecture overview
 
-Status: bench prototype, September 2026. This describes what is built and how the code is
+Status: bench prototype with event recording, September 2026. This describes what is built and how the code is
 organised; product requirements and open questions live in [product-notes.md](product-notes.md)
 and the ADRs under [adr/](adr/).
 
 ## Components
 
 ```
- iPhone app (SwiftUI)            Controller (Raspberry Pi, Python)          Camera
- ┌─────────────────────┐   TLS   ┌──────────────────────────────────┐  RTSP  ┌────────┐
- │ Solstead app        │ ──────▶ │ api.py  ── controller.py ── camera.py ─────▶ │ VIGI   │
- │  └ SolsteadKit      │  :8443  │            │                     (ffmpeg) │        │
- │     ControllerClient│         │            └── storage.py ── SSD          └────────┘
- │     PinnedTrust     │         │ provisioning.py: token, cert, config.json
- └─────────────────────┘         └──────────────────────────────────┘
+ iPhone app (SwiftUI)            Controller (Raspberry Pi, Python)                 Camera
+ ┌─────────────────────┐   TLS   ┌────────────────────────────────────────┐        ┌────────┐
+ │ Solstead app        │ ──────▶ │ api.py ── controller.py ── camera.py   │        │ VIGI   │
+ │  └ SolsteadKit      │  :8443  │             │    ├── buffer.py (ffmpeg) ◀─RTSP──│        │
+ │     ControllerClient│         │             │    ├── motion.py ── onvif.py ◀─ONVIF─│ events │
+ │     PinnedTrust     │         │             │    └── events.py ── clips.py       └────────┘
+ └─────────────────────┘         │             └── storage.py ── SSD: buffer/ events/ manual/
+                                 │ provisioning.py: token, cert, config.json
+                                 └────────────────────────────────────────┘
 ```
 
 - The controller exposes a small HTTPS API on the local network. There is no cloud, account or
@@ -24,6 +26,11 @@ and the ADRs under [adr/](adr/).
 - The pairing lives in the phone's Keychain, marked device-only so it is never synced or backed up.
 - Recording writes only to the mounted SSD. If the SSD is missing the controller reports it and
   refuses to record rather than filling the OS card.
+- Event recording follows the accepted defaults: a clip starts 10 seconds before the first
+  detected activity and ends 30 seconds after the last. The camera's own motion detection is the
+  trigger, delivered over ONVIF; the controller does no image analysis. The last minute of the
+  camera stream is buffered continuously as small segments, and clips are cut from that buffer
+  without re-encoding. Events live in a size-capped allocation; the oldest are overwritten.
 
 ## Repository layout
 
@@ -44,8 +51,8 @@ Names follow [CONTEXT.md](../CONTEXT.md): `Controller`, `Camera`, `Storage`, `Re
 
 In the order the product notes prioritise validation:
 
-1. Event recording with pre/post buffers from the camera's motion events, and the separate
-   event and time-lapse storage allocations.
+1. Validate event recording against the real VIGI S445: ONVIF topic names, the RTSP substream,
+   H.265 handling in the MP4 container, and the time-lapse allocation alongside events.
 2. Live view over the local network (low-resolution by default).
 3. Cellular remote access without vendor servers, after the carrier and modem validation in
    [cellular-validation-plan.md](cellular-validation-plan.md).
