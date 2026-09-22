@@ -72,6 +72,10 @@ class MotionWatcher:
 
     def sync_clock(self) -> None:
         """Set the camera's clock from ours; retried on the next step if it fails."""
+        if time.time() < 1767225600:  # our own clock is not set; do not spread it
+            self.next_clock_sync = time.time() + 600
+            self.last_error = "Controller clock not set; camera clock left alone"
+            return
         self.next_clock_sync = time.time() + CLOCK_SYNC_SECONDS
         try:
             set_camera_time(

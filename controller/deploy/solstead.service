@@ -5,12 +5,15 @@ Wants=network-online.target
 RequiresMountsFor=/mnt/solstead
 
 [Service]
-Type=simple
+Type=notify
+WatchdogSec=90
+TimeoutStopSec=20
 User=solstead
 Group=solstead
 ExecStart=/opt/solstead/venv/bin/solstead serve /etc/solstead/config.json
 Restart=always
 RestartSec=5
+StartLimitIntervalSec=0
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

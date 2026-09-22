@@ -18,6 +18,8 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/clips.py` | Assembles a clip from buffered segments with ffmpeg's concat demuxer. |
 | `solstead/live.py` | On-demand live view: ffmpeg copies a camera stream into 1-second HLS segments in RAM. |
 | `solstead/timelapse.py` | Scheduled frames in their own allocation, day listing, MP4 export, owner-adjustable settings. |
+| `solstead/health.py` | Health log: incidents in memory and in `<storage>/health.jsonl`, capped. |
+| `solstead/sdnotify.py` | systemd readiness and watchdog pings without a dependency. |
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
 | `solstead/provisioning.py` | Generates the owner token, self-signed certificate and config. |
@@ -93,6 +95,26 @@ assembles that day's frames with libx264 at `export_fps` and caches the result f
 `<storage>/timelapse-exports/`. These settings are owner-adjustable from the app through
 `PUT /v1/timelapse` and persist in `timelapse.json` next to `config.json`; the status reports an
 estimated retention in days from the current schedule and average frame size.
+
+## Unattended operation
+
+The controller is meant to run for weeks without a visit, so it watches itself:
+
+- **Watchdog.** Both units are `Type=notify` with `WatchdogSec=90`; the controller loop pings
+  systemd every half second. A hung process is killed and restarted (`Restart=always`,
+  `StartLimitIntervalSec=0`). Tested on the Pi by freezing the process: restarted in 97 s.
+- **Camera loss.** The buffer supervisor restarts ffmpeg five seconds after it exits; the
+  motion watcher resubscribes with a ten-second backoff. Each restart is logged.
+- **Storage loss.** Every five seconds the loop checks the SSD. If it is gone, recording stops
+  (so nothing lands on the OS card) and an error is logged; when it returns, recording restarts
+  and that is logged too. The health file itself is only written while the SSD is present.
+- **Clock.** A system time before 2026 means the clock is not set; the status flags it, and the
+  controller will not push that time to the camera.
+- **Health log.** `GET /v1/health?level=info|warning|error&limit=N` returns incidents newest
+  first (start, recording started/stopped, camera stream restarts, camera errors and recovery,
+  storage lost/returned, events recorded, live view, time-lapse errors). The status carries a
+  `health` block with `clock_ok`, counts for the last day and the latest warnings. Logs also go
+  to journald and to `controller.log` (rotating, 2 MB × 3) next to `config.json`.
 
 ## Camera isolation
 

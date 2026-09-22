@@ -248,3 +248,15 @@ def test_timelapse_routes(api, config, tmp_path):
     assert json.loads(call(api, "GET", "/v1/status")[1])["timelapse"]["interval_seconds"] == 60
     if config.settings_path:
         assert json.loads(config.settings_path.read_text())["interval_seconds"] == 60
+
+
+def test_health_route(api):
+    api.controller.health.record("warning", "camera", "Stream ended")
+    api.controller.health.record("info", "events", "Event recorded")
+    response, body = call(api, "GET", "/v1/health?level=warning&limit=10")
+    entries = json.loads(body)["entries"]
+    assert response.status == 200 and [e["kind"] for e in entries] == ["camera"]
+    response, body = call(api, "GET", "/v1/health")
+    assert len(json.loads(body)["entries"]) == 2
+    response, _ = call(api, "GET", "/v1/health?level=debug")
+    assert response.status == 400

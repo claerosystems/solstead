@@ -125,6 +125,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(201, controller.record())
             if get and path == "/v1/events":
                 return self.reply(200, {"events": controller.events()})
+            if get and path == "/v1/health":
+                level = query.get("level", "info")
+                if level not in ("info", "warning", "error"):
+                    return self.reply(400, {"error": "level must be info, warning or error"})
+                limit = min(max(int(query.get("limit", "100") or 100), 1), 500)
+                return self.reply(200, {"entries": controller.health.recent(limit, level)})
             if get and path == "/v1/timelapse":
                 return self.reply(
                     200, {**controller.timelapse.status(), "days": controller.timelapse.days()}

@@ -173,3 +173,57 @@ def test_controller_loop_reaps_idle_live_view(config, ffmpeg, tmp_path):
         time.sleep(0.05)
     controller.stop()
     assert not live.running
+
+
+def test_storage_loss_stops_events_and_return_restarts_them(config, ffmpeg, tmp_path):
+    import time
+    from dataclasses import replace
+
+    from solstead.buffer import SegmentBuffer
+    from solstead.controller import STORAGE_CHECK_SECONDS
+
+    enabled = replace(config, camera_onvif_url="http://cam/onvif", storage_require_mount=False)
+
+    class Sleeping:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    buffer = SegmentBuffer(enabled.camera_url, tmp_path / "buf", spawner=lambda *a, **k: Sleeping())
+    controller = Controller(
+        enabled, camera=Camera(enabled.camera_url, runner=ffmpeg), buffer=buffer
+    )
+    controller.watcher = None
+    controller._ensure_events()
+    assert controller.events_running
+    controller.storage.root = tmp_path / "unplugged"  # the SSD vanishes
+    controller._last_storage_check = time.monotonic() - STORAGE_CHECK_SECONDS - 1
+    controller._check_storage()
+    assert not controller.events_running and "not writable" in controller.events_reason
+    kinds = [e["kind"] for e in controller.health.recent()]
+    assert kinds[0] == "events" and kinds[1] == "storage"
+    controller.storage.root = config.storage_path  # it comes back
+    controller._last_storage_check = time.monotonic() - STORAGE_CHECK_SECONDS - 1
+    controller._check_storage()
+    assert controller.events_reason is None
+    controller._ensure_events()
+    assert controller.events_running
+    assert controller.health.recent()[0]["message"] == "Event recording started"
+    assert controller.status()["health"]["last_day"]["error"] == 1
+    assert controller.status()["health"]["clock_ok"] is True
+    controller.stop()
+
+
+def test_incident_polling_reports_buffer_restarts(config, ffmpeg, tmp_path):
+    controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg))
+    controller.buffer.restarts = 2
+    controller._poll_incidents()
+    entry = controller.health.recent()[0]
+    assert entry["kind"] == "camera" and entry["restarts"] == 2 and entry["level"] == "warning"
+    controller._poll_incidents()
+    assert len(controller.health.recent()) == 1  # not repeated

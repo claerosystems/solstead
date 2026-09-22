@@ -88,7 +88,12 @@ def test_serve_stops_controller_on_sigterm(tmp_path, storage_root):
     process = subprocess.Popen([sys.executable, "-m", "solstead", "serve", result["config"]],
                                stdout=subprocess.PIPE, text=True)  # fmt: skip
     try:
-        assert "ready" in process.stdout.readline()
+        seen = []
+        for _ in range(5):
+            seen.append(process.stdout.readline())
+            if "ready" in seen[-1]:
+                break
+        assert any("ready" in line for line in seen)
         os.kill(process.pid, signal.SIGTERM)
         out, _ = process.communicate(timeout=10)
         assert process.returncode == 0 and "stopped" in out

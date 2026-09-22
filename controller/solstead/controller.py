@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -12,16 +13,26 @@ from .camera import Camera, CameraError
 from .clips import ClipError, assemble
 from .config import Config
 from .events import Event, EventRecorder, EventStore
+from .health import HealthLog
 from .live import LiveStream
 from .motion import MotionWatcher
 from .onvif import PullPointClient
+from .sdnotify import notify
 from .storage import Storage, StorageUnavailable
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
 
 THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
 BUFFER_FOLDER = "buffer"
+HEALTH_FILE = "health.jsonl"
 TICK_SECONDS = 0.5
 RETRY_SECONDS = 30
+STORAGE_CHECK_SECONDS = 5
+CLOCK_SANITY_UNIX = 1767225600  # 2026-01-01: earlier than this and the clock is not set
+log = logging.getLogger("solstead")
+
+
+def clock_ok(now: float | None = None) -> bool:
+    return (time.time() if now is None else now) >= CLOCK_SANITY_UNIX
 
 
 class Controller:
@@ -68,6 +79,7 @@ class Controller:
         self.timelapse = timelapse or TimeLapse(
             config.storage_path, settings, self.frame_for_timelapse
         )
+        self.health = HealthLog(config.storage_path / HEALTH_FILE, guard=self._storage_ok)
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
         self.events_running = False
@@ -77,12 +89,33 @@ class Controller:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_attempt = 0.0
+        self._last_storage_check = 0.0
+        self._seen: dict = {
+            "buffer_restarts": 0,
+            "watcher_errors": 0,
+            "watcher_error": None,
+            "timelapse_error": None,
+            "recorder_error": None,
+            "clock_warned": False,
+        }
+
+    def _storage_ok(self) -> bool:
+        try:
+            self.storage.check()
+            return True
+        except StorageUnavailable:
+            return False
 
     # ---- lifecycle -----------------------------------------------------------------------
 
     def start(self) -> None:
         if self._thread:
             return
+        self.health.record("info", "controller", f"Started, software {__version__}")
+        if not clock_ok():
+            self.health.record(
+                "warning", "clock", "System clock is not set; timestamps are wrong until it is"
+            )
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="controller", daemon=True)
         self._thread.start()
@@ -97,12 +130,19 @@ class Controller:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
+            notify("WATCHDOG=1")
+            self._check_storage()
             if self.config.events_enabled:
                 self._ensure_events()
+            self._poll_incidents()
             self.live.reap()
             if self.events_running:
                 try:
-                    self.recorder.tick()
+                    for event in self.recorder.tick():
+                        self.health.record(
+                            "info", "events", "Event recorded",
+                            event=event.id, seconds=event.duration_seconds,
+                        )  # fmt: skip
                 except OSError as error:
                     self.recorder.last_error = f"Storage error: {type(error).__name__}"
             if self.camera.configured:
@@ -113,6 +153,31 @@ class Controller:
                     self.timelapse.last_error = str(error)
             self._stop.wait(TICK_SECONDS)
 
+    def _check_storage(self) -> None:
+        """Stop recording when the SSD disappears so nothing lands on the OS card; log both ways."""
+        if time.monotonic() - self._last_storage_check < STORAGE_CHECK_SECONDS:
+            return
+        self._last_storage_check = time.monotonic()
+        try:
+            self.storage.check()
+            available = True
+            reason = None
+        except StorageUnavailable as error:
+            available, reason = False, str(error)
+        if not available and self.events_running:
+            self.health.record("error", "storage", f"Recording storage lost: {reason}")
+            self._stop_events()
+            self.events_reason = reason
+        elif (
+            available
+            and self.events_reason
+            and "storage" in self.events_reason.lower()
+            or (available and self.events_reason and "mounted" in self.events_reason.lower())
+        ):
+            self.health.record("info", "storage", "Recording storage is back")
+            self.events_reason = None
+            self._last_attempt = 0.0  # retry immediately
+
     def _ensure_events(self) -> None:
         """Start (or restart after the SSD returns) the buffer and motion watcher."""
         if self.events_running or time.monotonic() - self._last_attempt < RETRY_SECONDS:
@@ -121,6 +186,8 @@ class Controller:
         try:
             self.storage.check()
         except StorageUnavailable as error:
+            if self.events_reason != str(error):
+                self.health.record("error", "storage", f"Cannot record: {error}")
             self.events_reason = str(error)
             return
         self.buffer.start()
@@ -128,11 +195,40 @@ class Controller:
             self.watcher.start()
         self.events_running = True
         self.events_reason = None
+        self.health.record("info", "events", "Event recording started")
+
+    def _poll_incidents(self) -> None:
+        """Turn counters and error fields from the workers into health-log entries."""
+        seen = self._seen
+        if self.buffer.restarts != seen["buffer_restarts"]:
+            seen["buffer_restarts"] = self.buffer.restarts
+            self.health.record("warning", "camera", "Camera stream ended; restarting the buffer",
+                               restarts=self.buffer.restarts)  # fmt: skip
+        if self.watcher:
+            if self.watcher.last_error != seen["watcher_error"]:
+                seen["watcher_error"] = self.watcher.last_error
+                if self.watcher.last_error:
+                    self.health.record("warning", "camera", self.watcher.last_error)
+                elif seen["watcher_errors"]:
+                    self.health.record("info", "camera", "Camera events are flowing again")
+            seen["watcher_errors"] = self.watcher.errors
+        if self.recorder.last_error != seen["recorder_error"]:
+            seen["recorder_error"] = self.recorder.last_error
+            if self.recorder.last_error:
+                self.health.record("error", "events", self.recorder.last_error)
+        if self.timelapse.last_error != seen["timelapse_error"]:
+            seen["timelapse_error"] = self.timelapse.last_error
+            if self.timelapse.last_error:
+                self.health.record("warning", "timelapse", self.timelapse.last_error)
+        if not seen["clock_warned"] and not clock_ok():
+            seen["clock_warned"] = True
 
     def _stop_events(self) -> None:
         if self.watcher:
             self.watcher.stop()
         self.buffer.stop()
+        if self.events_running:
+            self.health.record("info", "events", "Event recording stopped")
         self.events_running = False
 
     # ---- status --------------------------------------------------------------------------
@@ -185,6 +281,11 @@ class Controller:
             "events": self.events_status(),
             "live": self.live.status(),
             "timelapse": self.timelapse.status(),
+            "health": {
+                "clock_ok": clock_ok(),
+                "last_day": self.health.counts(int(time.time()) - 86400),
+                "latest": self.health.recent(3, "warning"),
+            },
             "recording_mode": "events" if self.config.events_enabled else "manual",
             "remote_access": False,
         }
@@ -243,10 +344,14 @@ class Controller:
         """Start live view (or keep it alive) and wait until it can be played."""
         if not self.live.available:
             raise CameraError("Camera is not configured")
+        was_running = self.live.running
         self.live.start(quality)
         if not self.live.wait_ready():
             self.live.stop()
+            self.health.record("warning", "live", f"Live view ({quality}) could not start")
             raise CameraError("Live view could not start; check the camera stream")
+        if not was_running:
+            self.health.record("info", "live", f"Live view started ({quality})")
         return {**self.live.status(), "playlist": "/v1/live/index.m3u8"}
 
     def stop_live(self) -> None:

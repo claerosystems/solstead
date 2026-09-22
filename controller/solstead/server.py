@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import logging.handlers
 import signal
 import ssl
 import sys
@@ -11,6 +13,7 @@ from http.server import ThreadingHTTPServer
 from .api import Handler
 from .config import Config
 from .controller import Controller
+from .sdnotify import notify
 
 SOCKET_TIMEOUT_SECONDS = 40
 
@@ -36,7 +39,25 @@ class Server(ThreadingHTTPServer):
             raise
 
 
+def configure_logging(config: Config) -> None:
+    """Log to stdout (journald) and to a small rotating file beside config.json."""
+    sys.stdout.reconfigure(line_buffering=True)
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if config.settings_path:
+        log_file = config.settings_path.with_name("controller.log")
+        handlers.append(
+            logging.handlers.RotatingFileHandler(log_file, maxBytes=2 * 1024**2, backupCount=3)
+        )
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+
+
 def serve(config: Config) -> None:
+    configure_logging(config)
     with Server(config) as server:
         # systemd stops us with SIGTERM; shut down cleanly so ffmpeg children do not outlive us.
         def on_signal(*_):
@@ -49,6 +70,7 @@ def serve(config: Config) -> None:
         print(
             f"Solstead controller ready on https://{config.bind}:{config.port} ({mode})", flush=True
         )
+        notify("READY=1")
         try:
             server.serve_forever()
         finally:
