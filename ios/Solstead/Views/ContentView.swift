@@ -484,8 +484,14 @@ struct EventsSection: View {
 
 struct ClipPlayerView: View {
     let clip: PlayableClip
+    @EnvironmentObject private var model: ControllerModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var player: AVPlayer?
+    @State private var saving = SaveState.idle
+    @State private var saveError: Error?
+
+    private enum SaveState { case idle, saving, saved }
 
     var body: some View {
         NavigationStack {
@@ -493,13 +499,57 @@ struct ClipPlayerView: View {
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle(clip.title)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { Button("Done") { dismiss() } }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        saveButton
+                        ShareLink(item: clip.url, preview: SharePreview(clip.title)) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                }
+                .alert("Couldn't save to Photos", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } }), presenting: saveError) { error in
+                    if error is PhotosAccessDenied {
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                        }
+                    }
+                    Button("OK", role: .cancel) {}
+                } message: { error in
+                    Text(error.localizedDescription)
+                }
                 .onAppear {
                     let player = AVPlayer(url: clip.url)
                     self.player = player
                     player.play()
                 }
                 .onDisappear { player?.pause() }
+        }
+    }
+
+    @ViewBuilder private var saveButton: some View {
+        switch saving {
+        case .saving:
+            ProgressView().accessibilityLabel("Saving to Photos")
+        case .saved:
+            Label("Saved to Photos", systemImage: "checkmark.circle")
+        case .idle:
+            Button { Task { await save() } } label: {
+                Label("Save to Photos", systemImage: "square.and.arrow.down")
+            }
+        }
+    }
+
+    private func save() async {
+        saving = .saving
+        do {
+            try await model.saveClipToPhotos(clip)
+            saving = .saved
+            try? await Task.sleep(for: .seconds(2))
+            saving = .idle
+        } catch {
+            saving = .idle
+            saveError = error
         }
     }
 }

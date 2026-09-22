@@ -260,7 +260,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Solstead;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your Solstead controller to view camera snapshots, recordings and storage health.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save camera snapshots you take to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save camera snapshots and clips you export to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -291,7 +291,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Solstead;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your Solstead controller to view camera snapshots, recordings and storage health.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save camera snapshots you take to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save camera snapshots and clips you export to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
