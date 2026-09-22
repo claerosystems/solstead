@@ -8,12 +8,9 @@ struct SolsteadApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
-                .tint(.solsteadGreen)
         }
     }
 }
 
-extension Color {
-    /// Brand green from docs/brand.
-    static let solsteadGreen = Color(red: 0.16, green: 0.36, blue: 0.28)
-}
+// The brand green is the app's accent colour (Assets.xcassets/AccentColor), so every control
+// picks it up, including inside sheets.

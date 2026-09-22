@@ -130,7 +130,9 @@ class Handler(BaseHTTPRequestHandler):
                     200, {**controller.timelapse.status(), "days": controller.timelapse.days()}
                 )
             if self.command == "PUT" and path == "/v1/timelapse":
-                return self.reply(200, controller.update_timelapse(self.read_json()))
+                controller.update_timelapse(self.read_json())
+                timelapse = controller.timelapse
+                return self.reply(200, {**timelapse.status(), "days": timelapse.days()})
             day = TIMELAPSE_DAY.match(path)
             if get and day:
                 frames = controller.timelapse.frames(day.group(1))
