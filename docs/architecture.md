@@ -31,6 +31,10 @@ and the ADRs under [adr/](adr/).
   The app plays it with AVPlayer through a loopback proxy inside the app, because AVPlayer's own
   networking cannot use the pinned session; the proxy fetches every segment through it. A
   full-quality option switches to the main stream.
+- Time-lapse takes a frame from the buffered stream on a schedule into a separate size-capped
+  allocation, and the controller assembles a day into a video on request. The owner changes the
+  interval and window from the app; the controller persists them and reports the retention that
+  schedule allows.
 - Event recording follows the accepted defaults: a clip starts 10 seconds before the first
   detected activity and ends 30 seconds after the last. The camera's own motion detection is the
   trigger, delivered over ONVIF; the controller does no image analysis. The last minute of the
@@ -56,8 +60,8 @@ Names follow [CONTEXT.md](../CONTEXT.md): `Controller`, `Camera`, `Storage`, `Re
 
 In the order the product notes prioritise validation:
 
-1. Validate event recording against the real VIGI S445: ONVIF topic names, the RTSP substream,
-   H.265 handling in the MP4 container, and the time-lapse allocation alongside events.
+1. Unattended-operation hardening before the winter trial: camera and SSD loss and return,
+   reboot recovery, log rotation, a health history the app can show.
 2. Live view over cellular reuses the same HLS path; measure data use per minute and the
    time-to-first-frame target with the VPN in place.
 3. Cellular remote access without vendor servers, after the carrier and modem validation in
