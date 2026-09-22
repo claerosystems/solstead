@@ -20,7 +20,7 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
 | `solstead/provisioning.py` | Generates the owner token, self-signed certificate and config. |
 | `solstead/cli.py` | `solstead serve | provision | fingerprint`. |
-| `deploy/` | systemd unit and the Pi installer. |
+| `deploy/` | systemd units, the Pi installers (system-wide and user-level), and the camera isolation firewall. |
 | `tools/fake_camera.py` | A fake camera for bench work: MPEG-TS test pattern over HTTP plus ONVIF motion bursts. |
 | `tests/` | pytest suite; ffmpeg is faked, openssl and TLS are real. |
 
@@ -59,6 +59,21 @@ camera stream and subscribes to the camera's ONVIF motion events:
 
 While the buffer runs, snapshots and manual test clips are taken from it rather than opening the
 camera a second time.
+
+The camera's clock matters because its notifications carry the camera's own timestamps. The
+watcher sets the camera's clock from the controller over ONVIF (`SetSystemDateAndTime`, manual
+mode) at start and every six hours, reports the observed skew in the status `events` block, and
+falls back to the controller's receipt time for any notification more than five seconds off.
+An isolated camera has no NTP, so this is what keeps its timestamps and video overlay honest.
+
+## Camera isolation
+
+The controller hands the camera its address (NetworkManager shared mode on the camera's Ethernet
+port), which by default would also route the camera to the Internet through the controller.
+`deploy/camera-isolation.sh` (run with sudo) installs an nftables table that drops all forwarding
+to or from the camera interface and DNS from it, persisted through `/etc/nftables.conf`. The
+camera can then talk to the controller only. Check it with
+`sudo nft list table inet solstead_camera`; the drop rules carry packet counters.
 
 The bench fake camera is an MPEG-TS stream over HTTP; real cameras use `rtsp://`.
 
@@ -105,6 +120,12 @@ Errors: 401 without a valid token, 404 unknown route, 503 with `{"error": "…"}
 storage is unavailable.
 
 ## Raspberry Pi deployment
+
+Two installers exist. `deploy/install-user.sh` needs no root: it installs a virtualenv under the
+checkout, provisions `~/.config/solstead`, and runs the controller as a systemd user service
+(`systemctl --user status solstead`, `journalctl --user -u solstead`); the user needs
+`loginctl enable-linger` so the service starts at boot. This is what the bench Pi runs.
+`deploy/install.sh` is the system-wide equivalent under a dedicated `solstead` user.
 
 `deploy/install.sh` installs ffmpeg and Python, creates a `solstead` system user, installs the
 package into `/opt/solstead/venv`, provisions `/etc/solstead` on first run, and enables the

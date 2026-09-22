@@ -139,6 +139,8 @@ class FakeCamera:
             return b'<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body/></s:Envelope>'
         if action == "UnsubscribeRequest":
             return b""
+        if action == "SetSystemDateAndTime":
+            return b'<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body/></s:Envelope>'
         raise AssertionError(action)
 
 
@@ -165,3 +167,17 @@ def test_pull_point_client_flow():
         camera.calls[1][0] == address
         and camera.calls[0][0] == "http://cam:2020/onvif/device_service"
     )
+
+
+def test_set_camera_time_sends_utc_manual_time():
+    from solstead.onvif import set_camera_time, set_time_body
+
+    body = set_time_body(1790085605)  # 2026-09-22T14:00:05Z
+    assert "<tds:DateTimeType>Manual</tds:DateTimeType>" in body
+    assert "<tt:Hour>14</tt:Hour><tt:Minute>0</tt:Minute><tt:Second>5</tt:Second>" in body
+    assert "<tt:Year>2026</tt:Year><tt:Month>9</tt:Month><tt:Day>22</tt:Day>" in body
+    camera = FakeCamera()
+    set_camera_time("http://cam/onvif", "u", "p", poster=camera, now=1790085605)
+    assert camera.calls == [("http://cam/onvif", "SetSystemDateAndTime")]
+    with pytest.raises(OnvifError, match="SetSystemDateAndTime"):
+        set_camera_time("http://cam/onvif", "u", "p", poster=lambda *a: FAULT)

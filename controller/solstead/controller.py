@@ -130,6 +130,8 @@ class Controller:
             "motion_active": self.recorder.active,
             "camera_subscribed": bool(self.watcher and self.watcher.subscribed),
             "camera_error": self.watcher.last_error if self.watcher else None,
+            "camera_clock_skew_seconds": self.watcher.last_skew_seconds if self.watcher else None,
+            "camera_clock_synced_unix": self.watcher.clock_synced_unix if self.watcher else None,
             "last_event_unix": self.recorder.last_event_unix,
             "last_error": self.recorder.last_error,
             "count": 0,

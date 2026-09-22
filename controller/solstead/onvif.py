@@ -34,6 +34,9 @@ CREATE_ACTION = (
 PULL_ACTION = "http://www.onvif.org/ver10/events/wsdl/PullPointSubscription/PullMessagesRequest"
 RENEW_ACTION = "http://docs.oasis-open.org/wsn/bw-2/SubscriptionManager/RenewRequest"
 UNSUBSCRIBE_ACTION = "http://docs.oasis-open.org/wsn/bw-2/SubscriptionManager/UnsubscribeRequest"
+DEVICE = "http://www.onvif.org/ver10/device/wsdl"
+SET_TIME_ACTION = DEVICE + "/SetSystemDateAndTime"
+MAX_CLOCK_SKEW_SECONDS = 5.0
 
 
 class OnvifError(Exception):
@@ -252,3 +255,36 @@ class PullPointClient:
             pass
         finally:
             self.subscription = None
+
+
+def set_time_body(now: float) -> str:
+    """SetSystemDateAndTime with the controller's UTC clock, in manual mode."""
+    t = datetime.fromtimestamp(now, UTC)
+    return (
+        f'<tds:SetSystemDateAndTime xmlns:tds="{DEVICE}" xmlns:tt="http://www.onvif.org/ver10/schema">'
+        "<tds:DateTimeType>Manual</tds:DateTimeType><tds:DaylightSavings>false</tds:DaylightSavings>"
+        "<tds:UTCDateTime>"
+        f"<tt:Time><tt:Hour>{t.hour}</tt:Hour><tt:Minute>{t.minute}</tt:Minute><tt:Second>{t.second}</tt:Second></tt:Time>"
+        f"<tt:Date><tt:Year>{t.year}</tt:Year><tt:Month>{t.month}</tt:Month><tt:Day>{t.day}</tt:Day></tt:Date>"
+        "</tds:UTCDateTime></tds:SetSystemDateAndTime>"
+    )
+
+
+def set_camera_time(
+    device_url: str,
+    user: str,
+    password: str,
+    poster: Poster = default_poster,
+    now: float | None = None,
+) -> None:
+    """Push the controller's clock to the camera. An isolated camera has no NTP, so the
+    controller keeps it honest; its event timestamps and video overlay depend on it."""
+    now = time.time() if now is None else now
+    security = username_token(user, password) if user else ""
+    response = poster(
+        device_url, envelope(SET_TIME_ACTION, device_url, set_time_body(now), security), 15
+    )
+    if response.strip():
+        fault = parse_fault(ET.fromstring(response))
+        if fault:
+            raise OnvifError(f"Camera fault on SetSystemDateAndTime: {fault}")
