@@ -17,14 +17,14 @@ struct ContentView: View {
                 }
                 if let status = model.status {
                     HealthSection(status: status)
-                    if let events = status.events, events.enabled {
-                        EventsSection(events: events)
-                    }
                     CameraSection(status: status)
                     if let lapse = model.timelapse {
                         TimeLapseSection(lapse: lapse)
                     }
                     RecordingsSection()
+                    if let events = status.events, events.enabled {
+                        EventsSection(events: events)
+                    }
                 }
             }
             .disabled(model.busy)
@@ -317,6 +317,7 @@ struct CameraSection: View {
 struct EventsSection: View {
     @EnvironmentObject private var model: ControllerModel
     let events: ControllerStatus.Events
+    @State private var expanded = false
 
     var body: some View {
         Section {
@@ -325,24 +326,28 @@ struct EventsSection: View {
                 Text(error).foregroundStyle(.red).font(.callout)
             }
             LabeledContent("Stored", value: "\(events.count) events, \(bytes(events.usedBytes)) of \(bytes(events.allocationBytes))")
-            if model.events.isEmpty {
-                Text("No events recorded yet").foregroundStyle(.secondary)
-            }
-            ForEach(model.events) { event in
-                Button {
-                    Task { await model.play(event) }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(event.started, format: .dateTime.weekday(.wide).month().day().hour().minute().second())
-                            Text("\(event.activitySeconds) s of activity, \(event.durationSeconds) s clip, \(bytes(event.sizeBytes))")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "play.circle")
-                    }
+            DisclosureGroup(isExpanded: $expanded) {
+                if model.events.isEmpty {
+                    Text("No events recorded yet").foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.primary)
+                ForEach(model.events) { event in
+                    Button {
+                        Task { await model.play(event) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(event.started, format: .dateTime.weekday(.wide).month().day().hour().minute().second())
+                                Text("\(event.activitySeconds) s of activity, \(event.durationSeconds) s clip, \(bytes(event.sizeBytes))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "play.circle")
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                }
+            } label: {
+                Text(model.events.isEmpty ? "Recorded events" : "Recorded events (\(model.events.count))")
             }
         } header: {
             Text("Events")
