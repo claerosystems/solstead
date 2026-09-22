@@ -12,6 +12,7 @@ from .camera import Camera, CameraError
 from .clips import ClipError, assemble
 from .config import Config
 from .events import Event, EventRecorder, EventStore
+from .live import LiveStream
 from .motion import MotionWatcher
 from .onvif import PullPointClient
 from .storage import Storage, StorageUnavailable
@@ -31,6 +32,7 @@ class Controller:
         buffer: SegmentBuffer | None = None,
         watcher: MotionWatcher | None = None,
         recorder: EventRecorder | None = None,
+        live: LiveStream | None = None,
     ):
         self.config = config
         self.storage = storage or Storage(
@@ -53,6 +55,11 @@ class Controller:
             )  # fmt: skip
             watcher = MotionWatcher(client, self.recorder)
         self.watcher = watcher
+        self.live = live or LiveStream(
+            config.camera_live_url, config.camera_url,
+            Path(config.live_path) if config.live_path else None,
+            config.live_segment_seconds, config.live_idle_seconds,
+        )  # fmt: skip
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
         self.events_running = False
@@ -66,7 +73,7 @@ class Controller:
     # ---- lifecycle -----------------------------------------------------------------------
 
     def start(self) -> None:
-        if not self.config.events_enabled or self._thread:
+        if self._thread:
             return
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="controller", daemon=True)
@@ -78,10 +85,13 @@ class Controller:
             self._thread.join(5)
             self._thread = None
         self._stop_events()
+        self.live.stop()
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._ensure_events()
+            if self.config.events_enabled:
+                self._ensure_events()
+            self.live.reap()
             if self.events_running:
                 try:
                     self.recorder.tick()
@@ -159,6 +169,7 @@ class Controller:
                 "last_success_unix": self.last_camera_ok,
             },
             "events": self.events_status(),
+            "live": self.live.status(),
             "recording_mode": "events" if self.config.events_enabled else "manual",
             "remote_access": False,
         }
@@ -199,6 +210,23 @@ class Controller:
 
     def recordings(self) -> list[dict]:
         return self.storage.clips()
+
+    def start_live(self, quality: str = "low") -> dict:
+        """Start live view (or keep it alive) and wait until it can be played."""
+        if not self.live.available:
+            raise CameraError("Camera is not configured")
+        self.live.start(quality)
+        if not self.live.wait_ready():
+            self.live.stop()
+            raise CameraError("Live view could not start; check the camera stream")
+        return {**self.live.status(), "playlist": "/v1/live/index.m3u8"}
+
+    def stop_live(self) -> None:
+        self.live.stop()
+
+    def live_file(self, name: str) -> Path | None:
+        self.live.touch()
+        return self.live.file(name)
 
     def events(self) -> list[dict]:
         self.storage.check()

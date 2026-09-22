@@ -136,3 +136,46 @@ def test_status_reports_events_block(api):
     status = json.loads(body)
     assert status["recording_mode"] == "manual"
     assert status["events"]["enabled"] is False and status["events"]["reason"]
+
+
+def test_live_routes(api, tmp_path):
+    from solstead.live import LiveStream
+    from tests.test_live import FakeHLS
+
+    api.controller.live = LiveStream(
+        "rtsp://cam/sub", "rtsp://cam/main", tmp_path / "live", spawner=FakeHLS()
+    )
+    response, body = call(api, "POST", "/v1/live?quality=medium")
+    assert response.status == 400
+    response, body = call(api, "POST", "/v1/live?quality=low")
+    assert response.status == 200
+    info = json.loads(body)
+    assert info["active"] and info["ready"] and info["playlist"] == "/v1/live/index.m3u8"
+    response, body = call(api, "GET", "/v1/live/index.m3u8")
+    assert (
+        response.status == 200
+        and response.getheader("Content-Type") == "application/vnd.apple.mpegurl"
+    )
+    assert response.getheader("Cache-Control") == "no-store" and b"seg_00001.m4s" in body
+    response, body = call(api, "GET", "/v1/live/init.mp4")
+    assert (
+        response.status == 200
+        and response.getheader("Content-Type") == "video/mp4"
+        and body == b"init"
+    )
+    response, body = call(api, "GET", "/v1/live/seg_00002.m4s")
+    assert response.status == 200 and response.getheader("Content-Type") == "video/iso.segment"
+    response, _ = call(api, "GET", "/v1/live/../../etc/passwd")
+    assert response.status == 404
+    response, body = call(api, "GET", "/v1/status")
+    assert json.loads(body)["live"]["active"] is True
+    response, body = call(api, "DELETE", "/v1/live")
+    assert response.status == 200 and json.loads(body)["active"] is False
+    response, _ = call(api, "GET", "/v1/live/index.m3u8")
+    assert response.status == 404
+
+
+def test_live_without_camera_is_503(api):
+    api.controller.live.urls = {"low": None, "high": None}
+    response, body = call(api, "POST", "/v1/live")
+    assert response.status == 503 and "not configured" in json.loads(body)["error"]

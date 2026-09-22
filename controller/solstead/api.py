@@ -7,7 +7,7 @@ import json
 import re
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from . import __version__
 from .controller import Unavailable
@@ -15,6 +15,12 @@ from .controller import Unavailable
 JSON = "application/json"
 CHUNK = 256 * 1024
 EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
+LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
+LIVE_TYPES = {
+    ".m3u8": "application/vnd.apple.mpegurl",
+    ".mp4": "video/mp4",
+    ".m4s": "video/iso.segment",
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -35,7 +41,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(data)
 
-    def send_file(self, path: Path, content_type: str) -> None:
+    def send_file(self, path: Path, content_type: str, cache: bool = True) -> None:
         """Serve a file with single-range support so video players can seek."""
         size = path.stat().st_size
         start, end = 0, size - 1
@@ -61,7 +67,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Cache-Control", "private, max-age=3600")
+        self.send_header("Cache-Control", "private, max-age=3600" if cache else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
@@ -86,7 +92,9 @@ class Handler(BaseHTTPRequestHandler):
     def handle_request(self) -> None:
         if not self.authorized():
             return self.reply(401, {"error": "Owner token required"})
-        path = urlsplit(self.path).path.rstrip("/")
+        parts = urlsplit(self.path)
+        path = parts.path.rstrip("/")
+        query = dict(parse_qsl(parts.query))
         controller = self.server.controller
         get = self.command in ("GET", "HEAD")
         try:
@@ -100,6 +108,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(201, controller.record())
             if get and path == "/v1/events":
                 return self.reply(200, {"events": controller.events()})
+            if self.command == "POST" and path == "/v1/live":
+                quality = query.get("quality", "low")
+                if quality not in ("low", "high"):
+                    return self.reply(400, {"error": "quality must be low or high"})
+                return self.reply(200, controller.start_live(quality))
+            if self.command == "DELETE" and path == "/v1/live":
+                controller.stop_live()
+                return self.reply(200, {"active": False})
+            live = LIVE_FILE.match(path)
+            if get and live:
+                found = controller.live_file(live.group(1))
+                if not found:
+                    return self.reply(404, {"error": "Live view is not running"})
+                content_type = LIVE_TYPES.get(found.suffix, "application/octet-stream")
+                return self.send_file(found, content_type, cache=False)
             clip = EVENT_CLIP.match(path)
             if get and clip:
                 found = controller.event_clip(clip.group(1))
@@ -115,3 +138,4 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = handle_request
     do_HEAD = handle_request
     do_POST = handle_request
+    do_DELETE = handle_request

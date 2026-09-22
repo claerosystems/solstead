@@ -154,3 +154,22 @@ def test_snapshot_and_record_come_from_buffer_when_running(config, ffmpeg, tmp_p
     controller.events_running = False
     controller.snapshot()
     assert "rtsp://" in calls[-1][calls[-1].index("-i") + 1]
+
+
+def test_controller_loop_reaps_idle_live_view(config, ffmpeg, tmp_path):
+    import time
+
+    from solstead.live import LiveStream
+    from tests.test_live import FakeHLS
+
+    live = LiveStream("rtsp://cam/sub", None, tmp_path / "live", idle_seconds=5, spawner=FakeHLS())
+    controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg), live=live)
+    controller.start_live("low")
+    assert controller.status()["live"]["active"]
+    live.last_touch = time.time() - 10  # pretend the viewer left a while ago
+    controller.start()
+    deadline = time.time() + 3
+    while live.running and time.time() < deadline:
+        time.sleep(0.05)
+    controller.stop()
+    assert not live.running

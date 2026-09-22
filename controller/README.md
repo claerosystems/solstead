@@ -16,6 +16,7 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/motion.py` | Background thread that subscribes, pulls, renews and feeds the recorder. |
 | `solstead/events.py` | Event recorder state machine and the size-capped events allocation. |
 | `solstead/clips.py` | Assembles a clip from buffered segments with ffmpeg's concat demuxer. |
+| `solstead/live.py` | On-demand live view: ffmpeg copies a camera stream into 1-second HLS segments in RAM. |
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
 | `solstead/provisioning.py` | Generates the owner token, self-signed certificate and config. |
@@ -66,6 +67,19 @@ mode) at start and every six hours, reports the observed skew in the status `eve
 falls back to the controller's receipt time for any notification more than five seconds off.
 An isolated camera has no NTP, so this is what keeps its timestamps and video overlay honest.
 
+## Live view
+
+`POST /v1/live?quality=low|high` starts one ffmpeg process that copies the camera stream (the
+`camera_live_url` substream for `low`, `camera_url` for `high`) into fragmented-MP4 HLS with
+`live_segment_seconds` segments under `live_path` (default `/dev/shm/solstead-live`, so nothing
+touches the SSD). The call returns once two segments exist, normally in about five seconds. The
+app then fetches `/v1/live/index.m3u8`, `init.mp4` and `seg_NNNNN.m4s` through the same
+authenticated API; every fetch counts as a viewer, and the stream stops by itself
+`live_idle_seconds` after the last one, or immediately on `DELETE /v1/live`. Switching quality
+restarts the stream. There is no transcoding, so CPU use is negligible and the same path will
+serve remote viewing later. Keyframe spacing sets the segment length: set the substream GOP to
+one second's worth of frames (`tools/camera_encoder.py --token minor --gov-length 25`).
+
 ## Camera isolation
 
 The controller hands the camera its address (NetworkManager shared mode on the camera's Ethernet
@@ -96,6 +110,9 @@ The bench fake camera is an MPEG-TS stream over HTTP; real cameras use `rtsp://`
 | `event_max_seconds` | `300` | Longest single event before it is cut. |
 | `segment_seconds`, `buffer_seconds` | `2`, `60` | Buffer segment length and how much to keep. |
 | `events_allocation_bytes` | 20 GiB | Size cap for `<storage>/events`; oldest events are overwritten. |
+| `camera_live_url` | none | Lower-resolution stream for live view; falls back to `camera_url`. |
+| `live_segment_seconds`, `live_idle_seconds` | `1`, `20` | HLS segment length and how long live view survives without a viewer. |
+| `live_path` | `/dev/shm/solstead-live` | Where live segments are written; should be RAM. |
 | `clip_seconds` | `10` | Length of a manual test clip. |
 | `snapshot_width` | `960` | Snapshot width in pixels; height keeps the aspect ratio. |
 | `min_free_bytes` | 2 GiB | Recording pauses below this much free space. |
@@ -109,12 +126,15 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 
 | Method and path | Result |
 | --- | --- |
-| `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, and an `events` block (running, buffer age, motion active, camera subscription, counts, allocation). |
+| `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, an `events` block (running, buffer age, motion active, camera subscription, counts, allocation), and a `live` block (available, active, quality, ready). |
 | `GET /v1/camera/snapshot` | One JPEG frame (`image/jpeg`). |
 | `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix}, …]}`, newest first, up to 200. |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD; returns its entry with status 201. |
 | `GET /v1/events` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, duration_seconds}, …]}`, newest first. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`) with `Range` support so players can seek. `HEAD` works too. |
+| `POST /v1/live?quality=low` | Start or keep live view (`low` or `high`); returns when playable, with the playlist path. |
+| `GET /v1/live/index.m3u8`, `GET /v1/live/{segment}` | The HLS playlist, `init.mp4` and `seg_NNNNN.m4s` segments. Each fetch keeps the stream alive. |
+| `DELETE /v1/live` | Stop live view now. |
 
 Errors: 401 without a valid token, 404 unknown route, 503 with `{"error": "…"}` when the camera or
 storage is unavailable.

@@ -5,7 +5,7 @@
                                  [--burst-every 60] [--burst-seconds 10]
 
 Point a controller at http://127.0.0.1:8554/live (MPEG-TS over HTTP; ffmpeg's RTSP listener is
-unreliable) and http://127.0.0.1:2020/onvif/device_service. GET http://127.0.0.1:2020/trigger
+unreliable), camera_live_url http://127.0.0.1:8555/sub, and http://127.0.0.1:2020/onvif/device_service. GET http://127.0.0.1:2020/trigger
 starts a motion burst immediately. The stream accepts one client at a time, which is what the
 controller's segment buffer uses; snapshots and manual clips come from the buffer.
 """
@@ -118,15 +118,15 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(f'<s:Envelope xmlns:s="{SOAP}"><s:Body/></s:Envelope>')
 
 
-def stream_forever(port: int) -> None:
+def stream_forever(port: int, size: str = "640x360", name: str = "live") -> None:
     args = [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning", "-re",
-        "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15",
+        "-f", "lavfi", "-i", f"testsrc2=size={size}:rate=15",
         "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "15",
-        "-pix_fmt", "yuv420p", "-f", "mpegts", "-listen", "1", f"http://127.0.0.1:{port}/live",
+        "-pix_fmt", "yuv420p", "-f", "mpegts", "-listen", "1", f"http://127.0.0.1:{port}/{name}",
     ]  # fmt: skip
     while True:
-        print(f"stream listening on http://127.0.0.1:{port}/live", flush=True)
+        print(f"stream listening on http://127.0.0.1:{port}/{name}", flush=True)
         child = subprocess.Popen(args)
         CHILDREN.append(child)
         child.wait()
@@ -148,6 +148,9 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--stream-port", type=int, default=8554)
+    parser.add_argument(
+        "--substream-port", type=int, default=8555, help="lower-resolution stream for live view"
+    )
     parser.add_argument("--onvif-port", type=int, default=2020)
     parser.add_argument("--burst-every", type=float, default=60)
     parser.add_argument("--burst-seconds", type=float, default=10)
@@ -157,6 +160,9 @@ def main() -> int:
     atexit.register(stop_children)
     signal.signal(signal.SIGTERM, stop_children)
     threading.Thread(target=stream_forever, args=(args.stream_port,), daemon=True).start()
+    threading.Thread(
+        target=stream_forever, args=(args.substream_port, "320x180", "sub"), daemon=True
+    ).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.onvif_port), Handler)
     print(f"onvif listening on http://127.0.0.1:{args.onvif_port}/onvif/device_service", flush=True)
     try:

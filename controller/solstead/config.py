@@ -42,6 +42,11 @@ class Config:
     segment_seconds: int = 2
     buffer_seconds: int = 60
     events_allocation_bytes: int = 20 * 1024**3
+    # Live view (uses camera_url when camera_live_url is unset).
+    camera_live_url: str | None = None
+    live_segment_seconds: int = 1
+    live_idle_seconds: int = 20
+    live_path: str | None = None
 
     @property
     def events_enabled(self) -> bool:
@@ -63,6 +68,9 @@ class Config:
         camera_url = data.get("camera_url") or None
         if camera_url is not None and not camera_url.startswith(CAMERA_SCHEMES):
             raise ConfigError("camera_url must be an rtsp:// or http:// stream URL")
+        live_url = data.get("camera_live_url") or None
+        if live_url is not None and not live_url.startswith(CAMERA_SCHEMES):
+            raise ConfigError("camera_live_url must be an rtsp:// or http:// stream URL")
         onvif_url = data.get("camera_onvif_url") or None
         if onvif_url is not None and not onvif_url.startswith(("http://", "https://")):
             raise ConfigError("camera_onvif_url must be an HTTP URL")
@@ -73,6 +81,8 @@ class Config:
             ("event_max_seconds", 10, 3600),
             ("segment_seconds", 1, 10),
             ("buffer_seconds", 10, 600),
+            ("live_segment_seconds", 1, 10),
+            ("live_idle_seconds", 5, 600),
         ):
             value = data.get(key)
             if value is not None and (not isinstance(value, int) or not low <= value <= high):
@@ -104,6 +114,10 @@ class Config:
             segment_seconds=int(data.get("segment_seconds", 2)),
             buffer_seconds=int(data.get("buffer_seconds", 60)),
             events_allocation_bytes=int(data.get("events_allocation_bytes", 20 * 1024**3)),
+            camera_live_url=live_url,
+            live_segment_seconds=int(data.get("live_segment_seconds", 1)),
+            live_idle_seconds=int(data.get("live_idle_seconds", 20)),
+            live_path=data.get("live_path") or None,
         )
 
     @classmethod
