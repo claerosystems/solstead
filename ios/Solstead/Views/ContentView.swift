@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 import SolsteadKit
 
@@ -14,11 +15,17 @@ struct ContentView: View {
                 }
                 if let status = model.status {
                     HealthSection(status: status)
+                    if let events = status.events, events.enabled {
+                        EventsSection(events: events)
+                    }
                     CameraSection(status: status)
                     RecordingsSection()
                 }
             }
             .disabled(model.busy)
+            .sheet(item: $model.playingClip) { clip in
+                ClipPlayerView(clip: clip)
+            }
             .navigationTitle("Solstead")
             .toolbar {
                 if model.isConnected {
@@ -100,8 +107,80 @@ struct CameraSection: View {
                 .disabled(!status.camera.configured)
             Button("Record 10-second test clip", systemImage: "record.circle") { Task { await model.recordTestClip() } }
                 .disabled(!status.camera.configured || !status.storage.ready)
-            Text("Manual bench recording. Automatic event recording and live video are coming next.")
+            Text("Manual test recording. Live video is coming next.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct EventsSection: View {
+    @EnvironmentObject private var model: ControllerModel
+    let events: ControllerStatus.Events
+
+    var body: some View {
+        Section {
+            LabeledContent("Detection", value: detectionText)
+            if let error = events.cameraError ?? events.lastError {
+                Text(error).foregroundStyle(.red).font(.callout)
+            }
+            LabeledContent("Stored", value: "\(events.count) events, \(bytes(events.usedBytes)) of \(bytes(events.allocationBytes))")
+            if model.events.isEmpty {
+                Text("No events recorded yet").foregroundStyle(.secondary)
+            }
+            ForEach(model.events) { event in
+                Button {
+                    Task { await model.play(event) }
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.started, format: .dateTime.weekday(.wide).month().day().hour().minute().second())
+                            Text("\(event.activitySeconds) s of activity, \(event.durationSeconds) s clip, \(bytes(event.sizeBytes))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "play.circle")
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+        } header: {
+            Text("Events")
+        } footer: {
+            Text("Clips start 10 seconds before detected activity and end 30 seconds after it. Oldest events are overwritten when the allocation is full.")
+        }
+    }
+
+    private var detectionText: String {
+        if !events.running { return events.reason ?? "Starting" }
+        if events.motionActive { return "Activity now, recording" }
+        if !events.bufferRunning { return "Camera stream down" }
+        if !events.cameraSubscribed { return "Waiting for camera events" }
+        return "Watching"
+    }
+
+    private func bytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+    }
+}
+
+struct ClipPlayerView: View {
+    let clip: PlayableClip
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        NavigationStack {
+            VideoPlayer(player: player)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle(clip.event.started.formatted(date: .abbreviated, time: .shortened))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { Button("Done") { dismiss() } }
+                .onAppear {
+                    let player = AVPlayer(url: clip.url)
+                    self.player = player
+                    player.play()
+                }
+                .onDisappear { player?.pause() }
         }
     }
 }

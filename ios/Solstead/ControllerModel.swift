@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 import SolsteadKit
 
@@ -12,6 +13,8 @@ final class ControllerModel: ObservableObject {
     // What the controller last told us.
     @Published private(set) var status: ControllerStatus?
     @Published private(set) var recordings: [Recording] = []
+    @Published private(set) var events: [Event] = []
+    @Published var playingClip: PlayableClip?
     @Published private(set) var snapshot: UIImage?
     @Published private(set) var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
@@ -51,7 +54,17 @@ final class ControllerModel: ObservableObject {
             client = nil
             status = nil
             recordings = []
+            events = []
             snapshot = nil
+        }
+    }
+
+    func play(_ event: Event) async {
+        await perform {
+            message = "Downloading \(ByteCountFormatter.string(fromByteCount: event.sizeBytes, countStyle: .file)) clip…"
+            let url = try await connected().downloadEventClip(event)
+            playingClip = PlayableClip(event: event, url: url)
+            message = "Playing event from \(event.started.formatted(date: .abbreviated, time: .shortened))."
         }
     }
 
@@ -60,6 +73,7 @@ final class ControllerModel: ObservableObject {
         client = nil
         status = nil
         recordings = []
+        events = []
         snapshot = nil
         token = ""
         fingerprint = ""
@@ -101,10 +115,12 @@ final class ControllerModel: ObservableObject {
 
     private func load(with client: ControllerClient) async throws {
         let newStatus = try await client.status()
-        // A missing SSD must still be visible on the health screen, so don't fail on recordings.
+        // A missing SSD must still be visible on the health screen, so don't fail on listings.
         let clips = newStatus.storage.ready ? try await client.recordings() : []
+        let eventClips = newStatus.storage.ready && newStatus.events?.enabled == true ? try await client.events() : []
         status = newStatus
         recordings = clips
+        events = eventClips
     }
 
     private func perform(_ work: () async throws -> Void, onFailure: () -> Void = {}) async {
@@ -131,4 +147,10 @@ enum BenchPairing {
         return nil
         #endif
     }
+}
+
+struct PlayableClip: Identifiable {
+    let event: Event
+    let url: URL
+    var id: String { event.id }
 }

@@ -58,6 +58,21 @@ public struct ControllerClient: Sendable {
         try await request("v1/camera/snapshot")
     }
 
+    public func events() async throws -> [Event] {
+        try decode(EventList.self, from: await request("v1/events")).events
+    }
+
+    /// Downloads an event clip to a temporary file and returns its URL. AVPlayer cannot use the
+    /// pinned session directly, so clips are fetched through it and played from disk.
+    public func downloadEventClip(_ event: Event) async throws -> URL {
+        let data = try await request("v1/events/\(event.id)/clip")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("solstead-clips", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(event.id + ".mp4")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
     @discardableResult
     public func record() async throws -> Recording {
         try decode(Recording.self, from: await request("v1/recordings", method: "POST"))

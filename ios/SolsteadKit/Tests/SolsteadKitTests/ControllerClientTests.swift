@@ -74,6 +74,40 @@ final class ControllerClientTests: XCTestCase {
         XCTAssertEqual(listed, [clip])
     }
 
+    func testStatusEventsBlockIsOptional() async throws {
+        transport.responses = [(200, statusJSON)]
+        let status = try await client.status()
+        XCTAssertNil(status.events)
+        let withEvents = statusJSON.dropLast(1) + Data("""
+        , "events": {"enabled": true, "running": true, "reason": null, "buffer_running": true,
+          "buffer_age_seconds": 1.5, "motion_active": false, "camera_subscribed": true, "camera_error": null,
+          "last_event_unix": 1758500100, "last_error": null, "count": 3, "used_bytes": 1000, "allocation_bytes": 2000}}
+        """.utf8).dropFirst(0)
+        transport.responses = [(200, Data(withEvents))]
+        let events = try await client.status().events
+        XCTAssertEqual(events?.count, 3)
+        XCTAssertEqual(events?.bufferAgeSeconds, 1.5)
+        XCTAssertEqual(events?.cameraSubscribed, true)
+    }
+
+    func testEventsAndClipDownload() async throws {
+        let eventJSON = #"{"id": "20260922T140005-abcdef01", "started_unix": 1790085605, "ended_unix": 1790085615, "clip_from_unix": 1790085595, "clip_to_unix": 1790085645, "size_bytes": 7, "trigger": "tns1:RuleEngine/CellMotionDetector/Motion", "created_unix": 1790085650, "duration_seconds": 50}"#
+        transport.responses = [
+            (200, Data(#"{"events": [\#(eventJSON)]}"#.utf8)),
+            (200, Data("mp4data".utf8)),
+        ]
+        let events = try await client.events()
+        XCTAssertEqual(events.count, 1)
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(event.activitySeconds, 10)
+        XCTAssertEqual(event.durationSeconds, 50)
+        XCTAssertEqual(transport.requests[0].url?.path, "/v1/events")
+        let url = try await client.downloadEventClip(event)
+        XCTAssertEqual(transport.requests[1].url?.path, "/v1/events/20260922T140005-abcdef01/clip")
+        XCTAssertEqual(try Data(contentsOf: url), Data("mp4data".utf8))
+        try? FileManager.default.removeItem(at: url)
+    }
+
     func testSnapshotReturnsRawBytes() async throws {
         transport.responses = [(200, Data([0xFF, 0xD8, 0x01]))]
         let data = try await client.snapshot()
