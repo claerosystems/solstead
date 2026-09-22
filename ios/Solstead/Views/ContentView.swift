@@ -18,6 +18,9 @@ struct ContentView: View {
                 if let status = model.status {
                     HealthSection(status: status)
                     CameraSection(status: status)
+                    if let lapse = model.timelapse {
+                        TimeLapseSection(lapse: lapse)
+                    }
                     RecordingsSection()
                     if let events = status.events, events.enabled {
                         EventsSection(events: events)
@@ -58,7 +61,6 @@ struct SettingsView: View {
                 PairingSection()
                 if let lapse = model.timelapse {
                     TimeLapseSettingsSection(lapse: lapse)
-                    TimeLapseSection(lapse: lapse)
                 }
                 Section("About") {
                     LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
@@ -161,7 +163,7 @@ struct TimeLapseSection: View {
         } header: {
             Text("Time-lapse videos")
         } footer: {
-            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second.")
+            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second. Adjust the schedule in Settings.")
         }
     }
 }
