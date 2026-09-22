@@ -40,6 +40,12 @@ struct ContentView: View {
             }
             .navigationTitle("Solstead")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Image("Mark")
+                        .resizable().scaledToFit()
+                        .frame(height: 26)
+                        .accessibilityHidden(true)
+                }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if model.isConnected {
                         Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
@@ -63,6 +69,13 @@ struct SettingsView: View {
                     TimeLapseSettingsSection(lapse: lapse)
                 }
                 Section("About") {
+                    HStack(spacing: 14) {
+                        Image("Mark").resizable().scaledToFit().frame(height: 44).accessibilityHidden(true)
+                        VStack(alignment: .leading) {
+                            Text("Solstead").font(.headline)
+                            Text("Your home under the sun. Your footage stays yours.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
                     if let status = model.status {
                         LabeledContent("Controller software", value: status.version)

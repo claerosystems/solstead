@@ -12,5 +12,5 @@ struct SolsteadApp: App {
     }
 }
 
-// The brand green is the app's accent colour (Assets.xcassets/AccentColor), so every control
-// picks it up, including inside sheets.
+// Brand colours live in Assets.xcassets: AccentColor is Night (Ivory in dark mode) and
+// SunColor is the sun from the mark. See docs/brand/README.md.

@@ -1,3 +1,5 @@
+<img src="docs/brand/solstead-mark.svg" alt="Solstead mark: a roof line over a half sun on the horizon" width="96">
+
 # Solstead
 
 A modular, solar-powered outdoor security system whose customers own and control their data.
