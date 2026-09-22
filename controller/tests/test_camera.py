@@ -68,3 +68,8 @@ def test_busy_lock_rejects_concurrent_capture():
     release.set()
     worker.join(5)
     camera.snapshot()  # lock released after the first capture finished
+
+
+def test_http_stream_skips_rtsp_transport(ffmpeg):
+    Camera("http://cam:8554/live", runner=ffmpeg).snapshot()
+    assert "-rtsp_transport" not in ffmpeg.calls[0] and "http://cam:8554/live" in ffmpeg.calls[0]

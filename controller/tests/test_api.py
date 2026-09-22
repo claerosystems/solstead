@@ -75,3 +75,64 @@ def test_camera_failure_is_503(api, ffmpeg):
     ffmpeg.returncode = 1
     response, body = call(api, "GET", "/v1/camera/snapshot")
     assert response.status == 503 and "secret" not in body.decode()
+
+
+def test_events_list_and_clip_with_ranges(api, config):
+    from tests.test_events import make_event
+
+    store = api.controller.store
+    event = make_event(store, "20260922T140005-abcdef01", 1790085605, size=1000)
+    response, body = call(api, "GET", "/v1/events")
+    assert response.status == 200
+    listed = json.loads(body)["events"]
+    assert listed[0]["id"] == event.id and listed[0]["duration_seconds"] == 50
+
+    response, body = call(api, "GET", f"/v1/events/{event.id}/clip")
+    assert response.status == 200 and response.getheader("Content-Type") == "video/mp4"
+    assert response.getheader("Accept-Ranges") == "bytes" and len(body) == 1000
+
+    conn = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=5)
+    conn.request(
+        "GET",
+        f"/v1/events/{event.id}/clip",
+        headers={"Authorization": "Bearer " + TOKEN, "Range": "bytes=10-19"},
+    )
+    response = conn.getresponse()
+    assert response.status == 206 and response.getheader("Content-Range") == "bytes 10-19/1000"
+    assert len(response.read()) == 10
+    conn.request(
+        "GET",
+        f"/v1/events/{event.id}/clip",
+        headers={"Authorization": "Bearer " + TOKEN, "Range": "bytes=990-"},
+    )
+    response = conn.getresponse()
+    assert response.status == 206 and len(response.read()) == 10
+    conn.request(
+        "GET",
+        f"/v1/events/{event.id}/clip",
+        headers={"Authorization": "Bearer " + TOKEN, "Range": "bytes=5000-"},
+    )
+    response = conn.getresponse()
+    assert response.status == 416 and response.read() == b""
+    conn.request(
+        "HEAD", f"/v1/events/{event.id}/clip", headers={"Authorization": "Bearer " + TOKEN}
+    )
+    response = conn.getresponse()
+    assert (
+        response.status == 200
+        and response.getheader("Content-Length") == "1000"
+        and response.read() == b""
+    )
+    conn.close()
+
+    response, _ = call(api, "GET", "/v1/events/../../etc/passwd/clip")
+    assert response.status == 404
+    response, _ = call(api, "GET", "/v1/events/missing/clip")
+    assert response.status == 404
+
+
+def test_status_reports_events_block(api):
+    response, body = call(api, "GET", "/v1/status")
+    status = json.loads(body)
+    assert status["recording_mode"] == "manual"
+    assert status["events"]["enabled"] is False and status["events"]["reason"]

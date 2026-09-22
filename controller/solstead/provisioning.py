@@ -53,6 +53,9 @@ def provision(
     port: int = 8443,
     camera_url: str | None = None,
     require_mount: bool = True,
+    camera_onvif_url: str | None = None,
+    camera_user: str = "",
+    camera_password: str = "",
 ) -> dict:
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -71,6 +74,9 @@ def provision(
         port=port,
         camera_url=camera_url,
         storage_require_mount=require_mount,
+        camera_onvif_url=camera_onvif_url,
+        camera_user=camera_user,
+        camera_password=camera_password,
     )
     config_path.write_text(json.dumps(config.to_dict(), indent=2) + "\n")
     os.chmod(config_path, 0o600)

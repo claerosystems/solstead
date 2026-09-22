@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     prov.add_argument("--port", type=int, default=8443)
     prov.add_argument("--camera-url", default=None, help="rtsp:// URL; may be set later")
     prov.add_argument(
+        "--camera-onvif-url", default=None, help="http://camera:2020/onvif/device_service"
+    )
+    prov.add_argument("--camera-user", default="")
+    prov.add_argument("--camera-password", default="")
+    prov.add_argument(
         "--no-require-mount", action="store_true",
         help="allow a plain folder as storage (bench use on a laptop only)",
     )  # fmt: skip
@@ -51,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
             result = provision(
                 args.dir, args.hostname, args.storage, args.name, args.bind, args.port,
                 args.camera_url, require_mount=not args.no_require_mount,
+                camera_onvif_url=args.camera_onvif_url, camera_user=args.camera_user,
+                camera_password=args.camera_password,
             )  # fmt: skip
             print("Provisioned. Enter these in the Solstead app; keep the token private.")
             for key in ("config", "url", "token", "fingerprint"):

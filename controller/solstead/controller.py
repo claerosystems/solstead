@@ -1,29 +1,117 @@
-"""The controller ties storage and camera together behind one API surface."""
+"""The controller ties storage, camera and event recording together behind one API surface."""
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
 from . import __version__
+from .buffer import SegmentBuffer
 from .camera import Camera, CameraError
+from .clips import ClipError, assemble
 from .config import Config
+from .events import Event, EventRecorder, EventStore
+from .motion import MotionWatcher
+from .onvif import PullPointClient
 from .storage import Storage, StorageUnavailable
 
 THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
+BUFFER_FOLDER = "buffer"
+TICK_SECONDS = 0.5
+RETRY_SECONDS = 30
 
 
 class Controller:
     def __init__(
-        self, config: Config, storage: Storage | None = None, camera: Camera | None = None
+        self,
+        config: Config,
+        storage: Storage | None = None,
+        camera: Camera | None = None,
+        buffer: SegmentBuffer | None = None,
+        watcher: MotionWatcher | None = None,
+        recorder: EventRecorder | None = None,
     ):
         self.config = config
         self.storage = storage or Storage(
             config.storage_path, config.storage_require_mount, config.min_free_bytes
         )
         self.camera = camera or Camera(config.camera_url, config.snapshot_width)
+        self.store = EventStore(config.storage_path, config.events_allocation_bytes)
+        self.buffer = buffer or SegmentBuffer(
+            config.camera_url, config.storage_path / BUFFER_FOLDER,
+            config.segment_seconds, config.buffer_seconds,
+        )  # fmt: skip
+        self.recorder = recorder or EventRecorder(
+            self.buffer, self.store, config.event_pre_seconds, config.event_post_seconds,
+            config.event_hold_seconds, config.event_max_seconds,
+        )  # fmt: skip
+        if watcher is None and config.events_enabled:
+            client = PullPointClient(
+                config.camera_onvif_url, config.camera_user, config.camera_password,
+                topics=config.motion_topics,
+            )  # fmt: skip
+            watcher = MotionWatcher(client, self.recorder)
+        self.watcher = watcher
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
+        self.events_running = False
+        self.events_reason: str | None = (
+            None if config.events_enabled else "Camera events not configured"
+        )
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_attempt = 0.0
+
+    # ---- lifecycle -----------------------------------------------------------------------
+
+    def start(self) -> None:
+        if not self.config.events_enabled or self._thread:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="controller", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(5)
+            self._thread = None
+        self._stop_events()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            self._ensure_events()
+            if self.events_running:
+                try:
+                    self.recorder.tick()
+                except OSError as error:
+                    self.recorder.last_error = f"Storage error: {type(error).__name__}"
+            self._stop.wait(TICK_SECONDS)
+
+    def _ensure_events(self) -> None:
+        """Start (or restart after the SSD returns) the buffer and motion watcher."""
+        if self.events_running or time.monotonic() - self._last_attempt < RETRY_SECONDS:
+            return
+        self._last_attempt = time.monotonic()
+        try:
+            self.storage.check()
+        except StorageUnavailable as error:
+            self.events_reason = str(error)
+            return
+        self.buffer.start()
+        if self.watcher:
+            self.watcher.start()
+        self.events_running = True
+        self.events_reason = None
+
+    def _stop_events(self) -> None:
+        if self.watcher:
+            self.watcher.stop()
+        self.buffer.stop()
+        self.events_running = False
+
+    # ---- status --------------------------------------------------------------------------
 
     @staticmethod
     def cpu_temperature() -> float | None:
@@ -31,6 +119,31 @@ class Controller:
             return float(THERMAL_ZONE.read_text()) / 1000
         except (OSError, ValueError):
             return None
+
+    def events_status(self) -> dict:
+        status = {
+            "enabled": self.config.events_enabled,
+            "running": self.events_running,
+            "reason": self.events_reason,
+            "buffer_running": self.buffer.running,
+            "buffer_age_seconds": None,
+            "motion_active": self.recorder.active,
+            "camera_subscribed": bool(self.watcher and self.watcher.subscribed),
+            "camera_error": self.watcher.last_error if self.watcher else None,
+            "last_event_unix": self.recorder.last_event_unix,
+            "last_error": self.recorder.last_error,
+            "count": 0,
+            "used_bytes": 0,
+            "allocation_bytes": self.config.events_allocation_bytes,
+        }
+        try:
+            age = self.buffer.newest_age()
+            status["buffer_age_seconds"] = None if age is None else round(age, 1)
+            status["count"] = len(self.store.events(limit=100000))
+            status["used_bytes"] = self.store.used_bytes()
+        except OSError:
+            pass
+        return status
 
     def status(self) -> dict:
         return {
@@ -43,19 +156,40 @@ class Controller:
                 "configured": self.camera.configured,
                 "last_success_unix": self.last_camera_ok,
             },
-            "recording_mode": "manual",
+            "events": self.events_status(),
+            "recording_mode": "events" if self.config.events_enabled else "manual",
             "remote_access": False,
         }
 
+    # ---- actions -------------------------------------------------------------------------
+
+    def _buffered(self, seconds: float) -> list:
+        """Completed buffer segments for the last `seconds`, or [] when the buffer is idle."""
+        if not (self.events_running and self.buffer.running):
+            return []
+        now = time.time()
+        return self.buffer.completed_between(now - seconds, now)
+
     def snapshot(self) -> bytes:
-        image = self.camera.snapshot()
+        recent = self._buffered(3 * self.config.segment_seconds + 2)
+        if recent:
+            image = self.camera.snapshot_from(recent[-1].path)
+        else:
+            image = self.camera.snapshot()
         self.last_camera_ok = int(time.time())
         return image
 
     def record(self) -> dict:
         partial, final = self.storage.reserve_clip()
         try:
-            self.camera.record(partial, self.config.clip_seconds)
+            recent = self._buffered(self.config.clip_seconds)
+            if recent:
+                try:
+                    assemble(recent, partial, runner=self.camera.runner)
+                except ClipError as error:
+                    raise CameraError(str(error)) from None
+            else:
+                self.camera.record(partial, self.config.clip_seconds)
             self.last_camera_ok = int(time.time())
             return self.storage.commit_clip(partial, final)
         finally:
@@ -63,6 +197,18 @@ class Controller:
 
     def recordings(self) -> list[dict]:
         return self.storage.clips()
+
+    def events(self) -> list[dict]:
+        self.storage.check()
+        return [event.to_dict() for event in self.store.events()]
+
+    def event_clip(self, event_id: str) -> tuple[Event, Path] | None:
+        self.storage.check()
+        event = self.store.load(event_id)
+        if event is None:
+            return None
+        path = self.store.clip_path(event.id)
+        return (event, path) if path.is_file() else None
 
 
 Unavailable = (StorageUnavailable, CameraError)

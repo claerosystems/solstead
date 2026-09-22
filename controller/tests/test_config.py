@@ -40,7 +40,8 @@ def test_bad_port(port):
 
 def test_camera_url_must_be_rtsp():
     with pytest.raises(ConfigError, match="camera_url"):
-        Config.from_dict({**GOOD, "camera_url": "http://cam"})
+        Config.from_dict({**GOOD, "camera_url": "ftp://cam"})
+    assert Config.from_dict({**GOOD, "camera_url": "http://cam:8554/live"}).camera_url
     assert Config.from_dict({**GOOD, "camera_url": ""}).camera_url is None
 
 
@@ -69,3 +70,20 @@ def test_example_config_parses():
     example = Path(__file__).resolve().parents[1] / "config.example.json"
     config = Config.load(example)
     assert config.camera_url.startswith("rtsp://")
+
+
+def test_event_settings():
+    config = Config.from_dict({**GOOD, "camera_url": "rtsp://cam/1", "camera_onvif_url": "http://cam:2020/onvif/device_service",
+                               "camera_user": "admin", "camera_password": "pw", "motion_topics": ["Motion", "Human"],
+                               "event_post_seconds": 20})  # fmt: skip
+    assert config.events_enabled and config.motion_topics == ("Motion", "Human")
+    assert config.event_post_seconds == 20 and config.event_pre_seconds == 10
+    assert Config.from_dict(config.to_dict()) == config
+    assert not Config.from_dict(GOOD).events_enabled
+
+
+@pytest.mark.parametrize("bad", [{"camera_onvif_url": "cam:2020"}, {"event_pre_seconds": 61},
+                                 {"segment_seconds": 0}, {"motion_topics": "Motion"}])  # fmt: skip
+def test_bad_event_settings(bad):
+    with pytest.raises(ConfigError):
+        Config.from_dict({**GOOD, **bad})

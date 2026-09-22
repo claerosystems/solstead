@@ -14,6 +14,14 @@ class CameraError(Exception):
     """The camera is not configured, busy, unreachable, or produced no output."""
 
 
+def input_args(url: str) -> list[str]:
+    """ffmpeg input options for a camera stream URL (RTSP over TCP, or plain HTTP/MPEG-TS)."""
+    args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
+    if url.startswith(("rtsp://", "rtsps://")):
+        args += ["-rtsp_transport", "tcp"]
+    return args + ["-i", url]
+
+
 class Camera:
     def __init__(
         self,
@@ -33,13 +41,14 @@ class Camera:
         return bool(self.url)
 
     def _base_args(self) -> list[str]:
-        return [
-            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-            "-rtsp_transport", "tcp", "-i", self.url,
-        ]  # fmt: skip
-
-    def _run(self, args: list[str], timeout: int) -> subprocess.CompletedProcess:
         if not self.configured:
+            raise CameraError("Camera is not configured")
+        return input_args(self.url)
+
+    def _run(
+        self, args: list[str], timeout: int, need_camera: bool = True
+    ) -> subprocess.CompletedProcess:
+        if need_camera and not self.configured:
             raise CameraError("Camera is not configured")
         if not self._lock.acquire(blocking=False):
             raise CameraError("Camera capture is busy; try again shortly")
@@ -54,6 +63,18 @@ class Camera:
             return result
         finally:
             self._lock.release()
+
+    def snapshot_from(self, path: Path) -> bytes:
+        """First frame of a buffered segment, so the camera is not opened a second time."""
+        args = [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(path),
+            "-frames:v", "1", "-an", "-vf", f"scale={self.snapshot_width}:-2",
+            "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
+        ]  # fmt: skip
+        result = self._run(args, self.timeout, need_camera=False)
+        if not result.stdout:
+            raise CameraError("Buffered segment produced no image")
+        return result.stdout
 
     def snapshot(self) -> bytes:
         args = self._base_args() + [

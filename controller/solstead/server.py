@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import signal
 import ssl
 import sys
+import threading
 from http.server import ThreadingHTTPServer
 
 from .api import Handler
@@ -36,11 +38,22 @@ class Server(ThreadingHTTPServer):
 
 def serve(config: Config) -> None:
     with Server(config) as server:
-        print(f"Solstead controller ready on https://{config.bind}:{config.port}", flush=True)
+        # systemd stops us with SIGTERM; shut down cleanly so ffmpeg children do not outlive us.
+        def on_signal(*_):
+            threading.Thread(target=server.shutdown, daemon=True).start()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, on_signal)
+        server.controller.start()
+        mode = "event recording" if config.events_enabled else "manual recording only"
+        print(
+            f"Solstead controller ready on https://{config.bind}:{config.port} ({mode})", flush=True
+        )
         try:
             server.serve_forever()
-        except KeyboardInterrupt:
-            pass
+        finally:
+            server.controller.stop()
+            print("Solstead controller stopped", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:

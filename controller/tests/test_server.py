@@ -74,3 +74,24 @@ def test_fingerprint_matches_openssl(tmp_path, storage_root):
                          capture_output=True, text=True, check=True).stdout  # fmt: skip
     expected = out.split("=")[1].strip().replace(":", "").lower()
     assert certificate_fingerprint(cert.read_text()) == expected == result["fingerprint"]
+
+
+def test_serve_stops_controller_on_sigterm(tmp_path, storage_root):
+    """Run the real server in a subprocess, send SIGTERM, and expect a clean exit."""
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    result = provision(tmp_path / "etc", "localhost", storage_root, bind="127.0.0.1", port=18443,
+                       require_mount=False)  # fmt: skip
+    process = subprocess.Popen([sys.executable, "-m", "solstead", "serve", result["config"]],
+                               stdout=subprocess.PIPE, text=True)  # fmt: skip
+    try:
+        assert "ready" in process.stdout.readline()
+        os.kill(process.pid, signal.SIGTERM)
+        out, _ = process.communicate(timeout=10)
+        assert process.returncode == 0 and "stopped" in out
+    finally:
+        if process.poll() is None:
+            process.kill()
