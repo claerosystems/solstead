@@ -9,10 +9,10 @@ description = "Solstead controller: local ownership, local recording."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-dependencies = []
+dependencies = ["cryptography>=41"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "pyrage>=1.2"]
 
 [project.scripts]
 solstead = "solstead.cli:main"

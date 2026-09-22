@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
 MANUAL_FOLDER = "manual"
+
+
+def ram_folder(name: str) -> Path:
+    """A folder in RAM (/dev/shm) for video that must never reach the SSD unencrypted."""
+    shm = Path("/dev/shm")
+    return (shm if shm.is_dir() else Path(tempfile.gettempdir())) / name
 
 
 class StorageUnavailable(Exception):

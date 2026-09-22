@@ -8,7 +8,7 @@ from tests.test_buffer import make_segment
 
 def make_event(store, event_id, started, size=100):
     store.folder.mkdir(parents=True, exist_ok=True)
-    store.clip_path(event_id).write_bytes(b"v" * size)
+    store.plain_path(event_id).write_bytes(b"v" * size)
     event = Event(
         event_id, started, started + 10, started - 10, started + 40, size, "motion", started + 40
     )
@@ -93,7 +93,7 @@ def test_isolated_event_produces_fifty_second_clip(tmp_path):
     assert event.trigger.endswith("Motion")
     assert 48 <= event.duration_seconds <= 52
     assert event.clip_from_unix <= event.started_unix - 10 < event.clip_from_unix + 2
-    assert s.store.events()[0] == event and s.store.clip_path(event.id).exists()
+    assert s.store.events()[0] == event and s.store.clip_path(event).exists()
     assert s.recorder.last_event_unix == int(s.now)
 
 

@@ -41,6 +41,9 @@ class Config:
     event_max_seconds: int = 300
     segment_seconds: int = 2
     buffer_seconds: int = 60
+    # Plaintext video (the pre-event buffer and clips being assembled) stays in RAM; unset means
+    # /dev/shm. Only sealed recordings are written to the SSD once keys are enrolled.
+    buffer_path: Path | None = None
     events_allocation_bytes: int = 20 * 1024**3
     # Live view (uses camera_url when camera_live_url is unset).
     camera_live_url: str | None = None
@@ -49,6 +52,8 @@ class Config:
     live_path: str | None = None
     # Owner-adjustable settings (time-lapse) are stored beside config.json.
     settings_path: Path | None = None
+    # Public keys recordings are sealed to, enrolled from the owner's phone.
+    recipients_path: Path | None = None
 
     @property
     def events_enabled(self) -> bool:
@@ -121,6 +126,10 @@ class Config:
             live_idle_seconds=int(data.get("live_idle_seconds", 20)),
             live_path=data.get("live_path") or None,
             settings_path=Path(data["settings_path"]) if data.get("settings_path") else None,
+            buffer_path=Path(data["buffer_path"]) if data.get("buffer_path") else None,
+            recipients_path=(
+                Path(data["recipients_path"]) if data.get("recipients_path") else None
+            ),
         )
 
     @classmethod
@@ -135,11 +144,15 @@ class Config:
         if not isinstance(data, dict):
             raise ConfigError("Configuration must be a JSON object")
         data.setdefault("settings_path", str(path.with_name("timelapse.json")))
+        data.setdefault("recipients_path", str(path.with_name("recipients.json")))
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        for key in ("storage_path", "tls_cert", "tls_key", "settings_path"):
+        for key in (
+            "storage_path", "tls_cert", "tls_key", "settings_path", "buffer_path",
+            "recipients_path",
+        ):  # fmt: skip
             if data[key] is not None:
                 data[key] = str(data[key])
         data["motion_topics"] = list(self.motion_topics)

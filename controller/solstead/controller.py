@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -17,12 +18,15 @@ from .health import HealthLog
 from .live import LiveStream
 from .motion import MotionWatcher
 from .onvif import PullPointClient
+from .recipients import RecipientStore
+from .recipients import parse as parse_recipients
 from .sdnotify import notify
-from .storage import Storage, StorageUnavailable
+from .sealing import SealingError
+from .storage import Storage, StorageUnavailable, ram_folder
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
 
-BUFFER_FOLDER = "buffer"
+LEGACY_BUFFER_FOLDER = "buffer"  # the pre-event buffer lived on the SSD before it moved to RAM
 HEALTH_FILE = "health.jsonl"
 TICK_SECONDS = 0.5
 RETRY_SECONDS = 30
@@ -54,13 +58,15 @@ class Controller:
         )
         self.camera = camera or Camera(config.camera_url, config.snapshot_width)
         self.store = EventStore(config.storage_path, config.events_allocation_bytes)
+        self.recipients = RecipientStore(config.recipients_path)
+        ram = config.buffer_path or ram_folder("solstead-buffer")
         self.buffer = buffer or SegmentBuffer(
-            config.camera_url, config.storage_path / BUFFER_FOLDER,
-            config.segment_seconds, config.buffer_seconds,
+            config.camera_url, ram / "segments", config.segment_seconds, config.buffer_seconds,
         )  # fmt: skip
         self.recorder = recorder or EventRecorder(
             self.buffer, self.store, config.event_pre_seconds, config.event_post_seconds,
             config.event_hold_seconds, config.event_max_seconds,
+            work_folder=ram / "work", recipients=self.recipients.keys,
         )  # fmt: skip
         if watcher is None and config.events_enabled:
             client = PullPointClient(
@@ -100,6 +106,7 @@ class Controller:
             "watcher_error": None,
             "timelapse_error": None,
             "recorder_error": None,
+            "sealing_error": None,
             "clock_warned": False,
         }
 
@@ -150,6 +157,7 @@ class Controller:
                         )  # fmt: skip
                 except OSError as error:
                     self.recorder.last_error = f"Storage error: {type(error).__name__}"
+                self._seal_backlog()
             if self.camera.configured:
                 try:
                     self.storage.check()
@@ -223,12 +231,28 @@ class Controller:
                 self.health.record("error", "storage", f"Cannot record: {error}")
             self.events_reason = str(error)
             return
+        legacy = self.config.storage_path / LEGACY_BUFFER_FOLDER
+        if legacy.is_dir() and legacy != self.buffer.folder:
+            shutil.rmtree(legacy, ignore_errors=True)
         self.buffer.start()
         if self.watcher:
             self.watcher.start()
         self.events_running = True
         self.events_reason = None
         self.health.record("info", "events", "Event recording started")
+
+    def _seal_backlog(self) -> None:
+        """Seal one clip recorded before keys were enrolled, a tick at a time."""
+        if not self.recipients.enrolled or self._seen["sealing_error"]:
+            return
+        try:
+            event = self.store.seal_next_plain(self.recipients.keys())
+        except (OSError, SealingError) as error:
+            self._seen["sealing_error"] = str(error)
+            self.health.record("error", "encryption", f"Could not encrypt an older clip: {error}")
+            return
+        if event:
+            log.info("Encrypted earlier clip %s", event.id)
 
     def _poll_incidents(self) -> None:
         """Turn counters and error fields from the workers into health-log entries."""
@@ -308,6 +332,7 @@ class Controller:
             "events": self.events_status(),
             "live": self.live.status(),
             "timelapse": self.timelapse.status(),
+            "encryption": self.encryption_status(),
             "health": {
                 "clock_ok": clock_ok(),
                 "last_day": self.health.counts(int(time.time()) - 86400),
@@ -398,8 +423,30 @@ class Controller:
         event = self.store.load(event_id)
         if event is None:
             return None
-        path = self.store.clip_path(event.id)
+        path = self.store.clip_path(event)
         return (event, path) if path.is_file() else None
+
+    # ---- encryption ----------------------------------------------------------------------
+
+    def encryption_status(self) -> dict:
+        status = self.recipients.status()
+        try:
+            events = self.store.events(limit=100000)
+            status["unencrypted_events"] = sum(not e.encrypted for e in events)
+        except OSError:
+            status["unencrypted_events"] = None
+        return status
+
+    def enroll(self, payload: object) -> dict:
+        """Replace the keys new recordings are sealed to. Existing sealed files are unchanged."""
+        recipients = parse_recipients(payload)
+        self.recipients.replace(recipients)
+        self._seen["sealing_error"] = None
+        self.health.record(
+            "info", "encryption", "Recording keys enrolled",
+            devices=sum(r.role == "device" for r in recipients),
+        )  # fmt: skip
+        return self.encryption_status()
 
 
 Unavailable = (StorageUnavailable, CameraError)

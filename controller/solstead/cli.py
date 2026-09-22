@@ -1,4 +1,4 @@
-"""Command line entry point: `solstead serve|provision|fingerprint`."""
+"""Command line entry point: `solstead serve|provision|fingerprint|keygen|decrypt`."""
 
 from __future__ import annotations
 
@@ -39,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     finger = commands.add_parser("fingerprint", help="print a certificate's SHA-256 fingerprint")
     finger.add_argument("certificate", type=Path)
+
+    commands.add_parser(
+        "keygen", help="print a new age key pair (bench testing; the phone makes real keys)"
+    )
+    decrypt = commands.add_parser("decrypt", help="decrypt a sealed recording with an age key")
+    decrypt.add_argument("identity", type=Path, help="file holding an AGE-SECRET-KEY-1… line")
+    decrypt.add_argument("sealed", type=Path)
+    decrypt.add_argument("output", type=Path)
     return parser
 
 
@@ -66,7 +74,22 @@ def main(argv: list[str] | None = None) -> int:
             from .provisioning import certificate_fingerprint
 
             print(certificate_fingerprint(args.certificate.read_text()))
-    except (ConfigError, ProvisioningError, OSError) as error:
+        elif args.command == "keygen":
+            from .sealing import generate_identity
+
+            identity, recipient = generate_identity()
+            print(f"# public key: {recipient}\n{identity}")
+        elif args.command == "decrypt":
+            from .sealing import open_stream, parse_identity
+
+            lines = args.identity.read_text().splitlines()
+            secret = parse_identity(next(x for x in lines if x.startswith("AGE-SECRET-KEY-1")))
+            with args.sealed.open("rb") as sealed, args.output.open("xb") as plain:
+                open_stream(sealed, plain, secret)
+    except StopIteration:
+        print("solstead: no AGE-SECRET-KEY-1 line in the identity file", file=sys.stderr)
+        return 1
+    except (ConfigError, ProvisioningError, OSError, ValueError) as error:
         print(f"solstead: {error}", file=sys.stderr)
         return 1
     return 0

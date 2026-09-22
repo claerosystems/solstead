@@ -1,7 +1,7 @@
 # Solstead controller
 
-The service that runs on the Raspberry Pi inside the controller. Standard library only, so it runs
-on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
+The service that runs on the Raspberry Pi inside the controller. The standard library plus
+`cryptography` (for sealing recordings); ffmpeg does the camera work.
 
 ## Layout
 
@@ -16,6 +16,8 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/motion.py` | Background thread that subscribes, pulls, renews and feeds the recorder. |
 | `solstead/events.py` | Event recorder state machine and the size-capped events allocation. |
 | `solstead/clips.py` | Assembles a clip from buffered segments with ffmpeg's concat demuxer. |
+| `solstead/sealing.py` | Seals files to public keys in the age v1 format (X25519, ChaCha20-Poly1305). |
+| `solstead/recipients.py` | The enrolled public keys (device and recovery) that recordings are sealed to. |
 | `solstead/live.py` | On-demand live view: ffmpeg copies a camera stream into 1-second HLS segments in RAM. |
 | `solstead/timelapse.py` | Scheduled frames in their own allocation, day listing, MP4 export, owner-adjustable settings. |
 | `solstead/health.py` | Health log: incidents in memory and in `<storage>/health.jsonl`, capped. |
@@ -24,7 +26,7 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
 | `solstead/provisioning.py` | Generates the owner token, self-signed certificate and config. |
-| `solstead/cli.py` | `solstead serve | provision | fingerprint`. |
+| `solstead/cli.py` | `solstead serve | provision | fingerprint | keygen | decrypt`. |
 | `deploy/` | systemd units, the Pi installers (system-wide and user-level), and the camera isolation firewall. |
 | `tools/fake_camera.py` | A fake camera for bench work: MPEG-TS test pattern over HTTP plus ONVIF motion bursts. |
 | `tests/` | pytest suite; ffmpeg is faked, openssl and TLS are real. |
@@ -49,7 +51,7 @@ When both `camera_url` and `camera_onvif_url` are set the controller keeps a rol
 camera stream and subscribes to the camera's ONVIF motion events:
 
 1. `buffer.py` runs one ffmpeg process that copies the stream (no transcoding) into
-   `<storage>/buffer/` as 2-second MPEG-TS segments named by wall-clock start time and prunes
+   `/dev/shm/solstead-buffer/segments/` (RAM) as 2-second MPEG-TS segments named by wall-clock start time and prunes
    segments older than `buffer_seconds`, except footage an open event still needs.
 2. `motion.py` pulls ONVIF notifications whose topic contains one of `motion_topics` and reads the
    `IsMotion`/`State` boolean. Cameras that only ever report "on" are handled by
@@ -96,6 +98,27 @@ assembles that day's frames with libx264 at `export_fps` and caches the result f
 `<storage>/timelapse-exports/`. These settings are owner-adjustable from the app through
 `PUT /v1/timelapse` and persist in `timelapse.json` next to `config.json`; the status reports an
 estimated retention in days from the current schedule and average frame size.
+
+## Encryption at rest
+
+See [ADR 0003](../docs/adr/0003-seal-recordings-to-owner-held-keys.md). The owner's phone enrols
+public keys with `PUT /v1/encryption`: at least one `device` key and exactly one `recovery` key,
+as age `age1…` strings. They are stored in `recipients.json` beside `config.json`, never on the SSD.
+From then on each event clip is assembled in RAM, sealed to every enrolled key, and written to the
+SSD as `<id>.mp4.age`; plaintext video never reaches the SSD. Clips recorded before enrolment are
+sealed one at a time in the background (their old blocks may survive on the drive). The
+controller holds no key that can decrypt anything.
+
+Until keys are enrolled, event clips are stored unencrypted as before and `GET /v1/status` reports
+`encryption.enrolled: false`. Manual test clips and time-lapse frames are not sealed yet.
+
+Any age implementation opens a sealed clip. For bench checks without the app:
+
+```bash
+.venv/bin/solstead keygen > key.txt            # prints the public key on its first line
+.venv/bin/solstead decrypt key.txt clip.mp4.age clip.mp4
+age -d -i key.txt clip.mp4.age > clip.mp4      # the same with the age tool
+```
 
 ## Unattended operation
 
@@ -155,6 +178,8 @@ The bench fake camera is an MPEG-TS stream over HTTP; real cameras use `rtsp://`
 | `camera_live_url` | none | Lower-resolution stream for live view; falls back to `camera_url`. |
 | `live_segment_seconds`, `live_idle_seconds` | `1`, `20` | HLS segment length and how long live view survives without a viewer. |
 | `live_path` | `/dev/shm/solstead-live` | Where live segments are written; should be RAM. |
+| `buffer_path` | `/dev/shm/solstead-buffer` | Pre-event buffer and clip assembly; must be RAM so plaintext never reaches the SSD. |
+| `recipients_path` | `recipients.json` beside `config.json` | Enrolled public keys recordings are sealed to. |
 | `clip_seconds` | `10` | Length of a manual test clip. |
 | `snapshot_width` | `960` | Snapshot width in pixels; height keeps the aspect ratio. |
 | `min_free_bytes` | 2 GiB | Recording pauses below this much free space. |
@@ -172,8 +197,10 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/camera/snapshot[?width=N]` | One JPEG frame (`image/jpeg`) at `snapshot_width` by default; `width=0` returns the camera's full resolution, taken from the buffer. |
 | `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix}, …]}`, newest first, up to 200. |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD; returns its entry with status 201. |
-| `GET /v1/events` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, duration_seconds}, …]}`, newest first. |
-| `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`) with `Range` support so players can seek. `HEAD` works too. |
+| `GET /v1/events` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
+| `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |
+| `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events}`. Also in the status as `encryption`. |
+| `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
 | `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames. |
 | `PUT /v1/timelapse` | Change `enabled`, `interval_seconds`, `window` (and `width`, `allocation_bytes`, `export_fps`); JSON body. |
 | `GET /v1/timelapse/{date}` | That day's frames (`name`, `unix`, `size_bytes`). |

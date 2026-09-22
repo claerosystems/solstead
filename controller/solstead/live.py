@@ -5,12 +5,12 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 from .camera import input_args
+from .storage import ram_folder
 
 Spawner = Callable[..., subprocess.Popen]
 
@@ -20,9 +20,7 @@ QUALITIES = ("low", "high")
 
 
 def default_live_dir() -> Path:
-    shm = Path("/dev/shm")
-    base = shm if shm.is_dir() else Path(tempfile.gettempdir())
-    return base / "solstead-live"
+    return ram_folder("solstead-live")
 
 
 class LiveStream:

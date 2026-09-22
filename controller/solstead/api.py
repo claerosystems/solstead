@@ -12,9 +12,11 @@ from urllib.parse import parse_qsl, urlsplit
 
 from . import __version__
 from .controller import Unavailable
+from .recipients import RecipientsError
 from .timelapse import TimeLapseError
 
 JSON = "application/json"
+SEALED = "application/octet-stream"  # an age-encryption.org/v1 file the phone decrypts
 CHUNK = 256 * 1024
 EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
@@ -133,6 +135,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(201, controller.record())
             if get and path == "/v1/events":
                 return self.reply(200, {"events": controller.events()})
+            if get and path == "/v1/encryption":
+                return self.reply(200, controller.encryption_status())
+            if self.command == "PUT" and path == "/v1/encryption":
+                return self.reply(200, controller.enroll(self.read_json()))
             if get and path == "/v1/health":
                 level = query.get("level", "info")
                 if level not in ("info", "warning", "error"):
@@ -186,9 +192,9 @@ class Handler(BaseHTTPRequestHandler):
                 found = controller.event_clip(clip.group(1))
                 if not found:
                     return self.reply(404, {"error": "Event not found"})
-                return self.send_file(found[1], "video/mp4")
+                return self.send_file(found[1], SEALED if found[0].encrypted else "video/mp4")
             return self.reply(404, {"error": "Not found"})
-        except TimeLapseError as error:
+        except (TimeLapseError, RecipientsError) as error:
             return self.reply(400, {"error": str(error)})
         except Unavailable as error:
             return self.reply(503, {"error": str(error)})

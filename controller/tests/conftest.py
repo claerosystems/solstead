@@ -29,6 +29,8 @@ def config(storage_root: Path, tmp_path: Path) -> Config:
         min_free_bytes=0,
         storage_require_mount=False,
         settings_path=tmp_path / "timelapse.json",
+        buffer_path=tmp_path / "ram",
+        recipients_path=tmp_path / "recipients.json",
     )
 
 

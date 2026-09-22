@@ -6,12 +6,14 @@ import json
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 from .buffer import SegmentBuffer
 from .clips import ClipError, assemble
+from .sealing import SUFFIX as SEALED_SUFFIX
+from .sealing import seal_file
 
 EVENTS_FOLDER = "events"
 
@@ -26,6 +28,7 @@ class Event:
     size_bytes: int
     trigger: str
     created_unix: int
+    encrypted: bool = False  # the clip is <id>.mp4.age, sealed to the enrolled keys
 
     @property
     def duration_seconds(self) -> int:
@@ -36,14 +39,20 @@ class Event:
 
 
 class EventStore:
-    """events/<id>.mp4 plus <id>.json, oldest deleted when the allocation is exceeded."""
+    """events/<id>.mp4[.age] plus <id>.json, oldest deleted when the allocation is exceeded."""
 
     def __init__(self, root: Path, allocation_bytes: int):
         self.folder = Path(root) / EVENTS_FOLDER
         self.allocation_bytes = allocation_bytes
 
-    def clip_path(self, event_id: str) -> Path:
+    def plain_path(self, event_id: str) -> Path:
         return self.folder / (event_id + ".mp4")
+
+    def sealed_path(self, event_id: str) -> Path:
+        return self.folder / (event_id + ".mp4" + SEALED_SUFFIX)
+
+    def clip_path(self, event: Event) -> Path:
+        return self.sealed_path(event.id) if event.encrypted else self.plain_path(event.id)
 
     def new_id(self, started: float) -> str:
         stamp = datetime.fromtimestamp(started).strftime("%Y%m%dT%H%M%S")
@@ -69,7 +78,7 @@ class EventStore:
         found = []
         for path in self.folder.glob("*.json"):
             event = self.load(path.stem)
-            if event and self.clip_path(event.id).is_file():
+            if event and self.clip_path(event).is_file():
                 found.append(event)
         found.sort(key=lambda e: e.started_unix, reverse=True)
         return found[:limit]
@@ -80,8 +89,27 @@ class EventStore:
         return sum(p.stat().st_size for p in self.folder.iterdir() if p.is_file())
 
     def delete(self, event_id: str) -> None:
-        for suffix in (".mp4", ".json"):
+        for suffix in (".mp4", ".mp4" + SEALED_SUFFIX, ".json"):
             (self.folder / (event_id + suffix)).unlink(missing_ok=True)
+
+    def seal_next_plain(self, recipients: list[bytes]) -> Event | None:
+        """Seal one clip recorded before keys were enrolled; None when there are none left.
+
+        The plaintext file is deleted afterwards, but an SSD does not guarantee the old blocks
+        are erased, so footage recorded before enrolment may remain recoverable from the drive.
+        """
+        for event in self.events(limit=100000):
+            if event.encrypted:
+                continue
+            plain, sealed = self.plain_path(event.id), self.sealed_path(event.id)
+            partial = sealed.with_name(sealed.name + ".partial")
+            seal_file(plain, partial, recipients)
+            partial.rename(sealed)
+            done = replace(event, encrypted=True, size_bytes=sealed.stat().st_size)
+            (self.folder / (event.id + ".json")).write_text(json.dumps(asdict(done)))
+            plain.unlink()
+            return done
+        return None
 
     def prune(self) -> list[str]:
         """Delete oldest events until the allocation fits. Returns deleted ids."""
@@ -90,11 +118,8 @@ class EventStore:
         used = self.used_bytes()
         while used > self.allocation_bytes and events:
             oldest = events.pop()
-            used -= (
-                self.clip_path(oldest.id).stat().st_size
-                if self.clip_path(oldest.id).exists()
-                else 0
-            )
+            for path in (self.clip_path(oldest), self.folder / (oldest.id + ".json")):
+                used -= path.stat().st_size if path.exists() else 0
             self.delete(oldest.id)
             deleted.append(oldest.id)
         return deleted
@@ -120,6 +145,8 @@ class EventRecorder:
         max_seconds: int = 300,
         assembler: Callable = assemble,
         clock: Callable[[], float] = time.time,
+        work_folder: Path | None = None,
+        recipients: Callable[[], list[bytes]] = list,
     ):
         self.buffer = buffer
         self.store = store
@@ -129,6 +156,10 @@ class EventRecorder:
         self.max_seconds = max_seconds
         self.assembler = assembler
         self.clock = clock
+        # With recipients enrolled, clips are assembled in work_folder (RAM) and only the sealed
+        # file reaches the SSD.
+        self.work_folder = work_folder
+        self.recipients = recipients
         self.started: float | None = None
         self.last_activity: float | None = None
         self.motion_ended: float | None = None
@@ -208,20 +239,32 @@ class EventRecorder:
         clip_to = last + self.post_seconds
         segments = self.buffer.completed_between(clip_from, clip_to)
         event_id = self.store.new_id(started)
-        output = self.store.clip_path(event_id)
+        keys = self.recipients()
+        output = self.store.sealed_path(event_id) if keys else self.store.plain_path(event_id)
         output.parent.mkdir(parents=True, exist_ok=True)
         partial = output.with_name(output.name + ".partial")
+        plain = partial
+        if keys:
+            work = self.work_folder or output.parent
+            work.mkdir(parents=True, exist_ok=True)
+            plain = work / (event_id + ".mp4.partial")
         try:
-            self.assembler(segments, partial)
+            self.assembler(segments, plain)
+            if keys:
+                seal_file(plain, partial, keys)
             partial.rename(output)
-        except ClipError as error:
-            self.last_error = str(error)
+        except (ClipError, OSError) as error:
+            self.last_error = str(error) if isinstance(error, ClipError) else "Saving clip failed"
             partial.unlink(missing_ok=True)
             return None
+        finally:
+            if plain != partial:
+                plain.unlink(missing_ok=True)
         event = Event(
             id=event_id, started_unix=int(started), ended_unix=int(last),
             clip_from_unix=int(segments[0].start), clip_to_unix=int(segments[-1].end),
             size_bytes=output.stat().st_size, trigger=trigger, created_unix=int(now),
+            encrypted=bool(keys),
         )  # fmt: skip
         self.store.save(event)
         self.last_event_unix = event.created_unix
