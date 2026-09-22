@@ -1,0 +1,24 @@
+[Unit]
+Description=Solstead controller
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/solstead
+
+[Service]
+Type=simple
+User=solstead
+Group=solstead
+ExecStart=/opt/solstead/venv/bin/solstead serve /etc/solstead/config.json
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/mnt/solstead
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

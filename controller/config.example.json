@@ -1,0 +1,14 @@
+{
+  "name": "Solstead bench",
+  "bind": "0.0.0.0",
+  "port": 8443,
+  "storage_path": "/mnt/solstead",
+  "storage_require_mount": true,
+  "api_token": "replace-with-at-least-32-random-characters-from-solstead-provision",
+  "tls_cert": "/etc/solstead/controller.crt",
+  "tls_key": "/etc/solstead/controller.key",
+  "camera_url": "rtsp://user:password@192.168.4.10:554/stream1",
+  "clip_seconds": 10,
+  "snapshot_width": 960,
+  "min_free_bytes": 2147483648
+}

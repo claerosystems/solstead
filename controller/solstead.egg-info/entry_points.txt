@@ -1,0 +1,2 @@
+[console_scripts]
+solstead = solstead.cli:main
