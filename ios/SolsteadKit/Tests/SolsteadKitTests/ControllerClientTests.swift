@@ -157,6 +157,19 @@ final class ControllerClientTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), Data("mp4".utf8))
     }
 
+    func testHealthLogAndStatusBlock() async throws {
+        transport.responses = [
+            (200, Data(#"{"entries": [{"unix": 1790085605, "level": "warning", "kind": "camera", "message": "Camera stream ended; restarting the buffer", "restarts": 1}]}"#.utf8)),
+            (200, statusJSON.dropLast(1) + Data(#", "health": {"clock_ok": true, "last_day": {"info": 4, "warning": 1, "error": 0}, "latest": []}}"#.utf8)),
+        ]
+        let entries = try await client.health(minimumLevel: "warning", limit: 20)
+        XCTAssertEqual(entries.first?.kind, "camera")
+        XCTAssertEqual(transport.requests[0].url?.query, "level=warning&limit=20")
+        let health = try await client.status().health
+        XCTAssertEqual(health?.lastDay.warning, 1)
+        XCTAssertEqual(health?.clockOk, true)
+    }
+
     func testSnapshotReturnsRawBytes() async throws {
         transport.responses = [(200, Data([0xFF, 0xD8, 0x01]))]
         let data = try await client.snapshot()

@@ -88,6 +88,11 @@ public struct ControllerClient: Sendable {
         return try writeTemporary(data, name: "timelapse-\(day).mp4")
     }
 
+    /// The controller's health log, newest first. `minimumLevel` is info, warning or error.
+    public func health(minimumLevel: String = "info", limit: Int = 100) async throws -> [HealthEntry] {
+        try decode(HealthList.self, from: await request("v1/health?level=\(minimumLevel)&limit=\(limit)")).entries
+    }
+
     public func events() async throws -> [Event] {
         try decode(EventList.self, from: await request("v1/events")).events
     }

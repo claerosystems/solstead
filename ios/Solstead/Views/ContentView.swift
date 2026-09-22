@@ -29,6 +29,9 @@ struct ContentView: View {
             }
             .disabled(model.busy)
             .sheet(isPresented: $model.showSettings) { SettingsView() }
+            .sheet(isPresented: Binding(get: { model.healthEntries != nil }, set: { if !$0 { model.healthEntries = nil } })) {
+                HealthLogView(entries: model.healthEntries ?? [])
+            }
             .sheet(item: $model.playingClip) { clip in
                 ClipPlayerView(clip: clip)
             }
@@ -197,6 +200,7 @@ struct PairingSection: View {
 }
 
 struct HealthSection: View {
+    @EnvironmentObject private var model: ControllerModel
     let status: ControllerStatus
 
     var body: some View {
@@ -219,11 +223,70 @@ struct HealthSection: View {
                 LabeledContent("Last capture", value: Date(timeIntervalSince1970: TimeInterval(last)).formatted(date: .abbreviated, time: .shortened))
             }
             LabeledContent("Remote access", value: status.remoteAccess ? "On" : "Off (local network only)")
+            if let health = status.health {
+                if !health.clockOk {
+                    Label("Controller clock is not set", systemImage: "clock.badge.exclamationmark").foregroundStyle(.red)
+                }
+                LabeledContent("Last 24 hours", value: health.lastDay.error == 0 && health.lastDay.warning == 0
+                    ? "No problems" : "\(health.lastDay.error) errors, \(health.lastDay.warning) warnings")
+                ForEach(health.latest) { entry in
+                    HealthRow(entry: entry)
+                }
+                Button("Show health log", systemImage: "list.bullet.rectangle") { Task { await model.showHealth() } }
+            }
         }
     }
 
     private func bytes(_ value: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+    }
+}
+
+struct HealthRow: View {
+    let entry: HealthEntry
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(colour)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.message)
+                Text(entry.date, format: .dateTime.month().day().hour().minute().second())
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var icon: String {
+        switch entry.level {
+        case "error": return "xmark.octagon.fill"
+        case "warning": return "exclamationmark.triangle.fill"
+        default: return "checkmark.circle"
+        }
+    }
+
+    private var colour: Color {
+        switch entry.level {
+        case "error": return .red
+        case "warning": return .orange
+        default: return .secondary
+        }
+    }
+}
+
+struct HealthLogView: View {
+    @Environment(\.dismiss) private var dismiss
+    let entries: [HealthEntry]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if entries.isEmpty { Text("Nothing logged yet").foregroundStyle(.secondary) }
+                ForEach(entries) { entry in HealthRow(entry: entry) }
+            }
+            .navigationTitle("Health log")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Done") { dismiss() } }
+        }
     }
 }
 

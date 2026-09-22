@@ -18,6 +18,7 @@ final class ControllerModel: ObservableObject {
     @Published var playingClip: PlayableClip?
     @Published var liveSession: LiveSession?
     @Published var showSettings = false
+    @Published var healthEntries: [HealthEntry]?  // non-nil while the health sheet is shown
     @Published private(set) var snapshot: UIImage?
     @Published private(set) var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
@@ -63,6 +64,12 @@ final class ControllerModel: ObservableObject {
             events = []
             timelapse = nil
             snapshot = nil
+        }
+    }
+
+    func showHealth() async {
+        await perform {
+            healthEntries = try await connected().health(minimumLevel: "info", limit: 200)
         }
     }
 

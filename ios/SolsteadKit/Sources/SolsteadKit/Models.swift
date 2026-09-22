@@ -41,6 +41,7 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let events: Events?
     public let live: Live?
     public let timelapse: TimeLapseStatus?
+    public let health: Health?
     public let recordingMode: String
     public let remoteAccess: Bool
 }
@@ -158,3 +159,31 @@ public enum ControllerJSONEncoder {
         return encoder
     }()
 }
+
+extension ControllerStatus {
+    /// Summary of the controller's health log.
+    public struct Health: Decodable, Equatable, Sendable {
+        public struct Counts: Decodable, Equatable, Sendable {
+            public let info: Int
+            public let warning: Int
+            public let error: Int
+        }
+
+        public let clockOk: Bool
+        public let lastDay: Counts
+        public let latest: [HealthEntry]
+    }
+}
+
+/// One line of the controller's health log.
+public struct HealthEntry: Decodable, Equatable, Identifiable, Sendable {
+    public let unix: Int
+    public let level: String
+    public let kind: String
+    public let message: String
+
+    public var id: String { "\(unix)-\(kind)-\(message)" }
+    public var date: Date { Date(timeIntervalSince1970: TimeInterval(unix)) }
+}
+
+struct HealthList: Decodable { let entries: [HealthEntry] }
