@@ -180,10 +180,13 @@ final class ControllerClientTests: XCTestCase {
     }
 
     func testSnapshotReturnsRawBytes() async throws {
-        transport.responses = [(200, Data([0xFF, 0xD8, 0x01]))]
+        transport.responses = [(200, Data([0xFF, 0xD8, 0x01])), (200, Data([0xFF, 0xD8, 0x02]))]
         let data = try await client.snapshot()
         XCTAssertEqual(data, Data([0xFF, 0xD8, 0x01]))
         XCTAssertEqual(transport.requests[0].url?.path, "/v1/camera/snapshot")
+        XCTAssertNil(transport.requests[0].url?.query)
+        _ = try await client.snapshot(width: 0)
+        XCTAssertEqual(transport.requests[1].url?.query, "width=0")
     }
 
     func testControllerErrorMessageIsSurfaced() async {

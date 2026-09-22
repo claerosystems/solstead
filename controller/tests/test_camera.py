@@ -73,3 +73,13 @@ def test_busy_lock_rejects_concurrent_capture():
 def test_http_stream_skips_rtsp_transport(ffmpeg):
     Camera("http://cam:8554/live", runner=ffmpeg).snapshot()
     assert "-rtsp_transport" not in ffmpeg.calls[0] and "http://cam:8554/live" in ffmpeg.calls[0]
+
+
+def test_snapshot_width_zero_means_no_scaling(ffmpeg):
+    camera = Camera("rtsp://cam/1", snapshot_width=960, runner=ffmpeg)
+    camera.snapshot()
+    assert "scale=960:-2" in ffmpeg.calls[-1]
+    camera.snapshot(0)
+    assert "-vf" not in ffmpeg.calls[-1] and "-q:v" in ffmpeg.calls[-1]
+    camera.snapshot(1280)
+    assert "scale=1280:-2" in ffmpeg.calls[-1]

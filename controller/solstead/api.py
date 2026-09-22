@@ -118,7 +118,15 @@ class Handler(BaseHTTPRequestHandler):
             if get and path == "/v1/status":
                 return self.reply(200, controller.status())
             if get and path == "/v1/camera/snapshot":
-                return self.reply(200, controller.snapshot(), "image/jpeg")
+                width = None
+                if "width" in query:
+                    try:
+                        width = int(query["width"])
+                    except ValueError:
+                        width = -1
+                    if not 0 <= width <= 8192:
+                        return self.reply(400, {"error": "width must be 0 (full) to 8192"})
+                return self.reply(200, controller.snapshot(width), "image/jpeg")
             if get and path == "/v1/recordings":
                 return self.reply(200, {"recordings": controller.recordings()})
             if self.command == "POST" and path == "/v1/recordings":

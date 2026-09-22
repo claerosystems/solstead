@@ -54,8 +54,10 @@ public struct ControllerClient: Sendable {
         try decode(RecordingList.self, from: await request("v1/recordings")).recordings
     }
 
-    public func snapshot() async throws -> Data {
-        try await request("v1/camera/snapshot")
+    /// A JPEG frame. `width` nil uses the controller's preview size; 0 asks for the camera's
+    /// full resolution.
+    public func snapshot(width: Int? = nil) async throws -> Data {
+        try await request(width.map { "v1/camera/snapshot?width=\($0)" } ?? "v1/camera/snapshot")
     }
 
     /// Starts live view (or switches quality). The controller answers once the first

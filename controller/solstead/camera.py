@@ -64,12 +64,29 @@ class Camera:
         finally:
             self._lock.release()
 
+    def _frame_args(self, width: int | None) -> list[str]:
+        """Output options for one JPEG frame; width 0 means the camera's full resolution."""
+        width = self.snapshot_width if width is None else width
+        scale = ["-vf", f"scale={width}:-2"] if width > 0 else []
+        return [
+            "-frames:v",
+            "1",
+            "-an",
+            *scale,
+            "-q:v",
+            "2",
+            "-f",
+            "image2pipe",
+            "-c:v",
+            "mjpeg",
+            "pipe:1",
+        ]
+
     def snapshot_from(self, path: Path, width: int | None = None) -> bytes:
         """First frame of a buffered segment, so the camera is not opened a second time."""
         args = [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(path),
-            "-frames:v", "1", "-an", "-vf", f"scale={width or self.snapshot_width}:-2",
-            "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
+            *self._frame_args(width),
         ]  # fmt: skip
         result = self._run(args, self.timeout, need_camera=False)
         if not result.stdout:
@@ -77,10 +94,7 @@ class Camera:
         return result.stdout
 
     def snapshot(self, width: int | None = None) -> bytes:
-        args = self._base_args() + [
-            "-frames:v", "1", "-an", "-vf", f"scale={width or self.snapshot_width}:-2",
-            "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
-        ]  # fmt: skip
+        args = self._base_args() + self._frame_args(width)
         result = self._run(args, self.timeout)
         if not result.stdout:
             raise CameraError("Camera returned an empty image")

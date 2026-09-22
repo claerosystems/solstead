@@ -18,9 +18,6 @@ struct ContentView: View {
                 if let status = model.status {
                     HealthSection(status: status)
                     CameraSection(status: status)
-                    if let lapse = model.timelapse {
-                        TimeLapseSection(lapse: lapse)
-                    }
                     RecordingsSection()
                     if let events = status.events, events.enabled {
                         EventsSection(events: events)
@@ -61,6 +58,7 @@ struct SettingsView: View {
                 PairingSection()
                 if let lapse = model.timelapse {
                     TimeLapseSettingsSection(lapse: lapse)
+                    TimeLapseSection(lapse: lapse)
                 }
                 Section("About") {
                     LabeledContent("App", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
@@ -140,11 +138,7 @@ struct TimeLapseSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("Captures", value: lapse.enabled ? "every \(lapse.intervalSeconds / 60) min, \(lapse.windowStart)–\(lapse.windowEnd)" : "Off")
             LabeledContent("Stored", value: "\(lapse.frames) frames over \(lapse.dayCount) days, \(ByteCountFormatter.string(fromByteCount: lapse.usedBytes, countStyle: .file))")
-            if let days = lapse.estimatedRetentionDays {
-                LabeledContent("Estimated history", value: "about \(days) days")
-            }
             if let error = lapse.lastError {
                 Text(error).foregroundStyle(.red).font(.callout)
             }
@@ -165,9 +159,9 @@ struct TimeLapseSection: View {
                 .foregroundStyle(.primary)
             }
         } header: {
-            Text("Time-lapse")
+            Text("Time-lapse videos")
         } footer: {
-            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second. Adjust the schedule in Settings.")
+            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second.")
         }
     }
 }
@@ -373,11 +367,38 @@ struct CameraSection: View {
 
     var body: some View {
         Section("Camera") {
-            if let image = model.snapshot {
-                Image(uiImage: image)
-                    .resizable().scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .accessibilityLabel("Latest requested camera snapshot")
+            if let snapshot = model.snapshot {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(uiImage: snapshot.image)
+                        .resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityLabel("Latest requested camera snapshot")
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                model.dismissSnapshot()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title2)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                                    .padding(6)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close snapshot")
+                        }
+                    HStack(spacing: 12) {
+                        Button { Task { await model.saveSnapshotToPhotos() } } label: {
+                            Label("Save to Photos", systemImage: "square.and.arrow.down").lineLimit(1).fixedSize()
+                        }
+                        ShareLink(item: snapshot.url, preview: SharePreview("Solstead snapshot", image: Image(uiImage: snapshot.image))) {
+                            Label("Share", systemImage: "square.and.arrow.up").lineLimit(1).fixedSize()
+                        }
+                        Spacer()
+                    }
+                    .buttonStyle(.bordered)
+                    .labelStyle(.titleAndIcon)
+                }
+                .padding(.vertical, 4)
             }
             Button("View live", systemImage: "video") { Task { await model.startLive() } }
                 .disabled(!(status.live?.available ?? status.camera.configured))

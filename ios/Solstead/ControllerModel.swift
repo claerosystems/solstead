@@ -1,4 +1,5 @@
 import AVKit
+import Photos
 import SwiftUI
 import SolsteadKit
 
@@ -19,7 +20,7 @@ final class ControllerModel: ObservableObject {
     @Published var liveSession: LiveSession?
     @Published var showSettings = false
     @Published var healthEntries: [HealthEntry]?  // non-nil while the health sheet is shown
-    @Published private(set) var snapshot: UIImage?
+    @Published private(set) var snapshot: Snapshot?
     @Published private(set) var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
 
@@ -144,11 +145,40 @@ final class ControllerModel: ObservableObject {
 
     func takeSnapshot() async {
         await perform {
-            let data = try await connected().snapshot()
+            message = "Capturing a full-resolution frame…"
+            let data = try await connected().snapshot(width: 0)
             guard let image = UIImage(data: data) else { throw ControllerError.invalidImage }
-            snapshot = image
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("solstead-snapshots", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).dateTimeSeparator(.standard))
+                .replacingOccurrences(of: ":", with: "-")
+            let url = folder.appendingPathComponent("Solstead \(stamp).jpg")
+            try data.write(to: url, options: .atomic)
+            snapshot = Snapshot(image: image, data: data, url: url, taken: Date())
             try await load(with: try connected())
-            message = "Snapshot updated."
+            message = "Snapshot: \(Int(image.size.width))×\(Int(image.size.height)), \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))."
+        }
+    }
+
+    func dismissSnapshot() {
+        if let url = snapshot?.url { try? FileManager.default.removeItem(at: url) }
+        snapshot = nil
+    }
+
+    /// Adds the full-resolution snapshot to the Photos library (add-only permission).
+    func saveSnapshotToPhotos() async {
+        guard let snapshot else { return }
+        await perform {
+            let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            guard status == .authorized || status == .limited else {
+                throw ControllerError.controller("Allow Solstead to add to Photos in Settings to save snapshots.", status: 0)
+            }
+            try await PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: .photo, data: snapshot.data, options: nil)
+                request.creationDate = snapshot.taken
+            }
+            message = "Snapshot saved to Photos."
         }
     }
 
@@ -218,4 +248,11 @@ struct LiveSession: Identifiable {
     let proxy: LiveProxy
     let requestedAt: Date
     var id: String { "live" }  // one sheet; quality changes update it in place
+}
+
+struct Snapshot {
+    let image: UIImage
+    let data: Data
+    let url: URL
+    let taken: Date
 }

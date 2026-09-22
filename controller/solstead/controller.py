@@ -326,12 +326,13 @@ class Controller:
         now = time.time()
         return self.buffer.completed_between(now - seconds, now)
 
-    def snapshot(self) -> bytes:
+    def snapshot(self, width: int | None = None) -> bytes:
+        """A JPEG frame; width 0 means full camera resolution, None the configured preview size."""
         recent = self._buffered(3 * self.config.segment_seconds + 2)
         if recent:
-            image = self.camera.snapshot_from(recent[-1].path)
+            image = self.camera.snapshot_from(recent[-1].path, width)
         else:
-            image = self.camera.snapshot()
+            image = self.camera.snapshot(width)
         self.last_camera_ok = int(time.time())
         return image
 

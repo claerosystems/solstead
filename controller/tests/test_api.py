@@ -50,10 +50,16 @@ def test_status(api):
     assert json.loads(body)["storage"]["ready"] is True
 
 
-def test_snapshot(api):
+def test_snapshot(api, ffmpeg):
     response, body = call(api, "GET", "/v1/camera/snapshot")
     assert response.status == 200 and response.getheader("Content-Type") == "image/jpeg"
-    assert body.startswith(b"\xff\xd8")
+    assert body.startswith(b"\xff\xd8") and "scale=960:-2" in ffmpeg.calls[-1]
+    response, body = call(api, "GET", "/v1/camera/snapshot?width=0")
+    assert response.status == 200 and "-vf" not in ffmpeg.calls[-1]
+    response, _ = call(api, "GET", "/v1/camera/snapshot?width=huge")
+    assert response.status == 400
+    response, _ = call(api, "GET", "/v1/camera/snapshot?width=9000")
+    assert response.status == 400
 
 
 def test_record_then_list(api):
