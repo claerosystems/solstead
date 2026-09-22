@@ -1,0 +1,24 @@
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode on the runner
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)" && xcodebuild -version
+      - name: SolsteadKit unit tests
+        working-directory: ios/SolsteadKit
+        run: swift test
+      - name: Build app for simulator
+        run: |
+          xcodebuild -project ios/Solstead.xcodeproj -scheme Solstead \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO build

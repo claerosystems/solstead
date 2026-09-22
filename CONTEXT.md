@@ -41,3 +41,11 @@ _Avoid_: Backup, permanent recording
 **Weather-resistant assembly**:
 The installed system with connected cables, capped unused ports, and closed service covers, intended to withstand outdoor rain, snow, dust, and hose spray. Submersion is outside its launch exposure scope.
 _Avoid_: Waterproof, without a defined exposure or test rating
+
+**Pairing**:
+The three values that let one phone reach one controller: its HTTPS address, the owner token, and the SHA-256 fingerprint of the controller's self-signed certificate. Stored only in the phone's Keychain.
+_Avoid_: Login, account
+
+**Owner token**:
+The random secret generated when a controller is provisioned and sent as a bearer token on every request. Possession of it is owner authority for the bench prototype.
+_Avoid_: Password, API key

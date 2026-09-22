@@ -11,3 +11,7 @@ xcuserdata/
 *.key
 config.local.json
 pairing.local.json
+.swiftpm/
+*.xcworkspace/xcshareddata/swiftpm/
+.bench/
+/.build/
