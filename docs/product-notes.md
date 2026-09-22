@@ -2,6 +2,10 @@
 
 ## Feasibility status
 
+Carrier preference confirmed 2026-09-14: retain the existing Public Mobile iPhone as the remote client; prioritize Rogers or TELUS for a separate controller test SIM. This is not authorization to switch the phone plan or purchase service. Neither candidate is yet validated for the required consumer eligibility, inbound VPN, and LTE SMS combination.
+
+Test inventory reported 2026-09-14: an iPhone with an existing data plan and a Raspberry Pi GSM/GPRS board based on SIM800. The user can order a separate SIM/plan for testing; no order has been placed or authorized for the assistant. Carrier, iPhone model, and available Pi host are not yet specified. SIM800 is unsuitable for validating the proposed LTE video path; see [cellular validation plan](cellular-validation-plan.md).
+
 The initial interview is sufficiently complete for a desktop feasibility review, accepted by the user on 2026-09-13. See [the feasibility review](feasibility-review.md) and [cellular investigation](cellular-feasibility.md). The accepted targets below remain requirements, not measured capabilities. No qualifying consumer cellular plan, suitable combined-identification camera, or complete C$250 landed BOM has yet been validated. No production implementation or purchase has been authorized by the review.
 
 ## Confirmed direction
@@ -110,3 +114,63 @@ A Raspberry Pi Zero or similar was suggested by the user for the controller. The
 - Installation size, weight, ingress/impact requirements, and feasibility at the $500 starter-kit target.
 - Camera/lens/illumination combination and acceptance tests for the agreed identification zone.
 - Off-site storage destination, protocol, upload policy, encryption, and data limits.
+
+## Camera purchasing research — 2026-09-15
+
+See [camera test candidate](camera-test-candidate.md) for historical research. The user rejected the C$460.48 Z12E because of price and accepted a C$200 camera ceiling before tax. Purchasing remains limited to Amazon.ca or another Canadian web store. The user is willing to relax the 3 m zone width; no replacement width or reduced identification distance has been accepted. No camera is selected.
+
+The user is reconsidering mandatory PoE because the controller has 12 V power. Current recommendation, pending acceptance: use a camera supporting both 12 V DC and standard PoE, with Ethernet data and separate regulated 12 V power for the first bench test. Retain PoE as an outdoor installation option. Direct Ethernet requires addressing configuration; two cameras require a switch. Compare measured total-system consumption and cable voltage drop before choosing production power distribution.
+
+
+## Camera shortlist and owned power equipment — 2026-09-15
+
+User owns a 12 V battery and a 12 V-to-5 V DC converter rated maximum 3 A / 15 W. Battery chemistry/capacity, converter model, output connection, regulation, continuous rating and cold rating are unknown. This does not establish combined Pi/modem power adequacy. Start with the Pi USB-C supply, then load-test converter voltage and recovery during LTE transmissions. Camera power requires its specified input range; nominal battery voltage is not necessarily regulated 12 V.
+
+Live Canadian listings checked: Reolink RLC-811A at Best Buy Canada, sold/shipped by ReolinkDirect, C$159.99, available online; TP-Link VIGI InSight S445 4 mm at Security Camera Shop, C$151.99 with Add to cart, stock quantity/delivery date not published. Both prices before tax/shipping. No purchase or camera selection made.
+
+RLC-811A offers 8 MP and 5x optical zoom but is rated only -10°C operating, so does not meet the winter requirement. S445 4 mm offers 4 MP, -30°C operating/-40°C storage, IP67, local RTSP/ONVIF and 12 V/PoE; fixed 80.4° horizontal view is unsuitable as evidence of 20 m identification. Manufacturer DORI identification distance is 8 m, not a night plate guarantee. Recommend S445 only for integration/winter/power testing if that experiment is chosen; RLC-811A is the alternative for zoom/image-detail testing in rated temperatures. User must decide before treating either compromise as accepted. Sources and specifics are in camera-test-candidate.md.
+
+
+## Prototype camera selected — 2026-09-15
+
+User accepted the TP-Link VIGI InSight S445 with the 4 mm lens as the first controller-integration and winter-test camera and stated they will order one. Purchase completion and arrival are not confirmed. Accepted scope includes close-range identification testing with the 20 m day/night person-and-plate identification requirement still unresolved. This is not a production camera selection. Planned first connection is Ethernet to the Pi and a separate regulated 12 V supply; standard PoE remains optional.
+
+
+## Owned battery identified — 2026-09-15
+
+User reports label 12V-18AH/20HR, product 010-2020-6. [Canadian Tire listing](https://www.canadiantire.ca/en/pdp/12-volt-18ah-sla-battery-0102020p.html) identifies this product as MK Battery 12 V 18 Ah sealed lead-acid (SLA). AGM/gel subtype is not confirmed. The 20-hour capacity rating corresponds to 0.9 A under rated test conditions; nominal energy is approximately 216 Wh, not guaranteed usable energy. Age, health, charger and cold capacity are unknown. Suitable candidate for initial bench power tests once condition and charging arrangement are checked, not a validated three-day winter battery. Camera requires regulated 12 V ±5%; existing 12-to-5 V converter does not provide this camera supply. Charger identification remains the next question.
+
+
+## Battery/charger recommendation pending — 2026-09-15
+
+User owns a small NOCO charger; exact model and selected charge mode unknown. Recommend reusing the existing healthy 12 V 18 Ah SLA battery for bench testing and confirming the NOCO model before buying a charger. GENIUS1 and GENIUS2 support 12 V lead-acid charging; choose mode against the battery subtype and charging specifications, not merely the SLA label. A small charger is not assumed sufficient to power the live system and recharge simultaneously. Production/winter chemistry and capacity remain unselected: compare deep-cycle AGM with temperature-compensated charging against LiFePO4 with low-temperature charge protection and controlled heating. LiFePO4 heating and recovery must fit measured winter solar budget and cold-survival requirements; no cold-weather pack is approved yet. Solar stage requires a compatible charge controller; a mains charger does not replace it.
+
+
+## Owned chargers confirmed — 2026-09-15
+
+User confirms NOCO G750 and also owns an unidentified 12 A charger. G750 is a 0.75 A 6/12 V lead-acid charger rated for 2–30 Ah batteries per NOCO G750 V2.0 guide; suitable size for recharging the existing 18 Ah SLA between bench tests. Do not assume it sustains the running system. Recommend retaining existing battery/G750 for initial tests. The 12 A charger is not approved for this small battery without its model/current settings and the battery maximum charging-current specification; 12 A is approximately 0.67C for 18 Ah. Ask charger model and whether a lower-current setting exists. No new battery/charger purchase selected.
+
+
+## MotoMaster charger identified by controls — 2026-09-15
+
+User describes MotoMaster Eliminator Intelligent charger with Optimal Charge Logic and 2–12 A Optimal / 2 A / 8 A / 12 A selections. This matches Canadian Tire 0111518 (exact label product number not yet supplied): https://www.canadiantire.ca/en/pdp/motomaster-eliminator-intelligent-battery-charger-12-8-2a-0111518p.html . Retailer explicitly specifies 2 A for small batteries and 8/12 A for large batteries. Recommend fixed 2 A for the 18 Ah SLA, subject to any lower maximum charging current printed on the battery; do not select automatic 2–12 A or 8/12 A for this bench plan. Retain G750 as slower alternative. No new charger or battery needed for initial bench measurements. Recharge with prototype disconnected initially. Camera regulated 12 V branch remains necessary; charger is not a regulated camera power supply.
+
+
+## Camera ordered and DC converter proposed — 2026-09-15
+
+User confirms S445 ordered. See [camera power specification](camera-power-spec.md). Recommend MEAN WELL DDR-30G-12 for the one-camera prototype; selection/purchase pending. Retain separate Pi 5 V supply. Cable connector, branch protection, battery undervoltage cutoff and measured performance remain to be verified.
+
+
+## Purchasing preference — 2026-09-15
+
+User prefers ordering everything possible from Amazon.ca with Prime. Apply to remaining prototype parts, including the camera DC converter. Canadian specialist retailers are fallback sources when a suitable Prime item cannot be verified. This preference does not authorize checkout or imply acceptance of an unverified substitute.
+
+## DROK selected for testing; bench wiring — 2026-09-18
+
+User intends to order DROK 12 V / 5 A; not yet confirmed purchased. Treat as bench evaluation, not winter qualification. Existing 12 V to 5 V / 3 A converter is a provisional Pi-only bench supply pending model, output connector and loaded-voltage checks. Pi 4 uses USB-C and recommends a 5 V / 3 A supply; combined Pi/LTE operation is not validated by that rating. Any shared higher-current supply requires checking modem board revision and power routing to avoid backfeeding. Prefer battery feeding camera and Pi converters in parallel.
+
+Bench accessory list: short stranded copper 16 AWG battery/distribution wire, 18 AWG camera leads, genuine lever connectors or covered terminal blocks, correctly sized battery crimp terminals and insulation, protected battery positive connection, short Cat5e/Cat6 patch cable, camera DC plug (5.5 mm OD confirmed; bore/polarity pending), Pi USB-C power lead appropriate to converter output, modem USB data cable matching delivered board. Meter required before camera connection. DC-rated manual-reset breaker can replace a fuse if interrupt rating, trip curve, wiring and connectors are suitable; do not select generic high-current car-audio breakers or assume auto-reset is desirable. Exact protection rating pending completed wiring/inrush review. Neither device substitutes for battery low-voltage cutoff.
+
+## Outdoor battery direction — 2026-09-18
+
+User asks what battery to use for the real system. Propose 12.8 V LiFePO4 with cell-temperature-based low-temperature charge cutoff, controlled heating, and automatic recovery; 100 Ah is a field-prototype sizing reference, not a selected purchase or final product size. Three-day capacity cannot be finalized until battery-side average power is measured. At 80% usable nominal energy, 100 Ah gives 1024 Wh before cold/heater/aging/reserve allowances; 15 W average over 72 h already needs 1080 Wh. Compact panel and heater startup must be designed together. Renogy Canada self-heating Pro listing requires stable 6 A charge current; exact model/manual must control, since other variants differ. No winter-qualified battery approved and no purchase recommended yet. Existing 18 Ah SLA remains suitable for obtaining bench power measurements. AGM remains an alternative only with explicit model cold charging/storage ratings; Rolls support page extracted charge minimum 0°C and storage minimum -20°C despite search snippet suggesting otherwise, so do not blanket approve AGM for the -20°C/-40°C requirements.
