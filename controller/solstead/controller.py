@@ -16,6 +16,7 @@ from .live import LiveStream
 from .motion import MotionWatcher
 from .onvif import PullPointClient
 from .storage import Storage, StorageUnavailable
+from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
 
 THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
 BUFFER_FOLDER = "buffer"
@@ -33,6 +34,7 @@ class Controller:
         watcher: MotionWatcher | None = None,
         recorder: EventRecorder | None = None,
         live: LiveStream | None = None,
+        timelapse: TimeLapse | None = None,
     ):
         self.config = config
         self.storage = storage or Storage(
@@ -60,6 +62,12 @@ class Controller:
             Path(config.live_path) if config.live_path else None,
             config.live_segment_seconds, config.live_idle_seconds,
         )  # fmt: skip
+        settings = (
+            load_settings(config.settings_path) if config.settings_path else TimeLapseSettings()
+        )
+        self.timelapse = timelapse or TimeLapse(
+            config.storage_path, settings, self.frame_for_timelapse
+        )
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
         self.events_running = False
@@ -97,6 +105,12 @@ class Controller:
                     self.recorder.tick()
                 except OSError as error:
                     self.recorder.last_error = f"Storage error: {type(error).__name__}"
+            if self.camera.configured:
+                try:
+                    self.storage.check()
+                    self.timelapse.tick()
+                except StorageUnavailable as error:
+                    self.timelapse.last_error = str(error)
             self._stop.wait(TICK_SECONDS)
 
     def _ensure_events(self) -> None:
@@ -170,6 +184,7 @@ class Controller:
             },
             "events": self.events_status(),
             "live": self.live.status(),
+            "timelapse": self.timelapse.status(),
             "recording_mode": "events" if self.config.events_enabled else "manual",
             "remote_access": False,
         }
@@ -210,6 +225,19 @@ class Controller:
 
     def recordings(self) -> list[dict]:
         return self.storage.clips()
+
+    def frame_for_timelapse(self, width: int) -> bytes:
+        recent = self._buffered(3 * self.config.segment_seconds + 2)
+        if recent:
+            return self.camera.snapshot_from(recent[-1].path, width)
+        return self.camera.snapshot(width)
+
+    def update_timelapse(self, changes: dict) -> dict:
+        settings = TimeLapseSettings.from_dict(changes, base=self.timelapse.settings)
+        self.timelapse.settings = settings
+        if self.config.settings_path:
+            save_settings(self.config.settings_path, settings)
+        return self.timelapse.status()
 
     def start_live(self, quality: str = "low") -> dict:
         """Start live view (or keep it alive) and wait until it can be played."""

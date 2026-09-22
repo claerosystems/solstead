@@ -17,6 +17,7 @@ on Raspberry Pi OS without extra packages; ffmpeg does the camera work.
 | `solstead/events.py` | Event recorder state machine and the size-capped events allocation. |
 | `solstead/clips.py` | Assembles a clip from buffered segments with ffmpeg's concat demuxer. |
 | `solstead/live.py` | On-demand live view: ffmpeg copies a camera stream into 1-second HLS segments in RAM. |
+| `solstead/timelapse.py` | Scheduled frames in their own allocation, day listing, MP4 export, owner-adjustable settings. |
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
 | `solstead/provisioning.py` | Generates the owner token, self-signed certificate and config. |
@@ -80,6 +81,19 @@ restarts the stream. There is no transcoding, so CPU use is negligible and the s
 serve remote viewing later. Keyframe spacing sets the segment length: set the substream GOP to
 one second's worth of frames (`tools/camera_encoder.py --token minor --gov-length 25`).
 
+## Time-lapse
+
+While the camera is configured and storage is ready, the controller saves one JPEG frame every
+`interval_seconds` (default 300) during a local-time `window` (default `06:00-18:00`) under
+`<storage>/timelapse/YYYY-MM-DD/HHMMSS.jpg`, taken from the buffered stream at `width` pixels
+(default 1920). Frames live in their own `allocation_bytes` (default 4 GiB); the oldest are
+deleted when it fills, so time-lapse can never crowd out event clips. Captures align to interval
+boundaries and resume from existing frames after a restart. `GET /v1/timelapse/{date}/video.mp4`
+assembles that day's frames with libx264 at `export_fps` and caches the result for a day under
+`<storage>/timelapse-exports/`. These settings are owner-adjustable from the app through
+`PUT /v1/timelapse` and persist in `timelapse.json` next to `config.json`; the status reports an
+estimated retention in days from the current schedule and average frame size.
+
 ## Camera isolation
 
 The controller hands the camera its address (NetworkManager shared mode on the camera's Ethernet
@@ -126,12 +140,17 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 
 | Method and path | Result |
 | --- | --- |
-| `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, an `events` block (running, buffer age, motion active, camera subscription, counts, allocation), and a `live` block (available, active, quality, ready). |
+| `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, an `events` block (running, buffer age, motion active, camera subscription, counts, allocation), a `live` block (available, active, quality, ready), and a `timelapse` block (settings and counts). |
 | `GET /v1/camera/snapshot` | One JPEG frame (`image/jpeg`). |
 | `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix}, …]}`, newest first, up to 200. |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD; returns its entry with status 201. |
 | `GET /v1/events` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, duration_seconds}, …]}`, newest first. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`) with `Range` support so players can seek. `HEAD` works too. |
+| `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames. |
+| `PUT /v1/timelapse` | Change `enabled`, `interval_seconds`, `window` (and `width`, `allocation_bytes`, `export_fps`); JSON body. |
+| `GET /v1/timelapse/{date}` | That day's frames (`name`, `unix`, `size_bytes`). |
+| `GET /v1/timelapse/{date}/{HHMMSS}.jpg` | One frame. |
+| `GET /v1/timelapse/{date}/video.mp4` | That day's frames assembled into an H.264 video. |
 | `POST /v1/live?quality=low` | Start or keep live view (`low` or `high`); returns when playable, with the playlist path. |
 | `GET /v1/live/index.m3u8`, `GET /v1/live/{segment}` | The HLS playlist, `init.mp4` and `seg_NNNNN.m4s` segments. Each fetch keeps the stream alive. |
 | `DELETE /v1/live` | Stop live view now. |

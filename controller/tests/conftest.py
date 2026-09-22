@@ -28,6 +28,7 @@ def config(storage_root: Path, tmp_path: Path) -> Config:
         clip_seconds=2,
         min_free_bytes=0,
         storage_require_mount=False,
+        settings_path=tmp_path / "timelapse.json",
     )
 
 

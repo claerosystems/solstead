@@ -179,3 +179,72 @@ def test_live_without_camera_is_503(api):
     api.controller.live.urls = {"low": None, "high": None}
     response, body = call(api, "POST", "/v1/live")
     assert response.status == 503 and "not configured" in json.loads(body)["error"]
+
+
+def test_timelapse_routes(api, config, tmp_path):
+    from datetime import datetime
+
+    from solstead.timelapse import TimeLapse, TimeLapseSettings
+
+    stamp = datetime(2026, 9, 22, 9, 0).timestamp()
+    lapse = TimeLapse(
+        config.storage_path, TimeLapseSettings(), lambda w: b"\xff\xd8jpg", clock=lambda: stamp
+    )
+
+    def runner(args, capture_output, timeout):
+        __import__("pathlib").Path(args[-1]).write_bytes(b"mp4")
+        return __import__("subprocess").CompletedProcess(args, 0, b"", b"")
+
+    lapse.runner = runner
+    api.controller.timelapse = lapse
+    lapse.tick(stamp)
+
+    response, body = call(api, "GET", "/v1/timelapse")
+    status = json.loads(body)
+    assert (
+        response.status == 200
+        and status["frames"] == 1
+        and status["days"][0]["date"] == "2026-09-22"
+    )
+    assert status["interval_seconds"] == 300 and status["frames_per_day"] == 144
+
+    response, body = call(api, "GET", "/v1/timelapse/2026-09-22")
+    assert response.status == 200 and json.loads(body)["frames"][0]["name"] == "090000.jpg"
+    response, body = call(api, "GET", "/v1/timelapse/2026-09-22/090000.jpg")
+    assert (
+        response.status == 200
+        and response.getheader("Content-Type") == "image/jpeg"
+        and body == b"\xff\xd8jpg"
+    )
+    response, body = call(api, "GET", "/v1/timelapse/2026-09-22/video.mp4")
+    assert (
+        response.status == 200
+        and response.getheader("Content-Type") == "video/mp4"
+        and body == b"mp4"
+    )
+    response, _ = call(api, "GET", "/v1/timelapse/2026-09-23")
+    assert response.status == 404
+    response, _ = call(api, "GET", "/v1/timelapse/2026-09-23/video.mp4")
+    assert response.status == 400
+
+    conn = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=5)
+    conn.request("PUT", "/v1/timelapse", body=json.dumps({"interval_seconds": 60, "window": "08:00-16:00"}),
+                 headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"})  # fmt: skip
+    response = conn.getresponse()
+    updated = json.loads(response.read())
+    assert (
+        response.status == 200
+        and updated["interval_seconds"] == 60
+        and updated["frames_per_day"] == 480
+    )
+    conn.request("PUT", "/v1/timelapse", body=json.dumps({"interval_seconds": 1}),
+                 headers={"Authorization": "Bearer " + TOKEN})  # fmt: skip
+    response = conn.getresponse()
+    assert response.status == 400 and "interval" in json.loads(response.read())["error"]
+    conn.request("PUT", "/v1/timelapse", body="nope", headers={"Authorization": "Bearer " + TOKEN})
+    response = conn.getresponse()
+    assert response.status == 400
+    conn.close()
+    assert json.loads(call(api, "GET", "/v1/status")[1])["timelapse"]["interval_seconds"] == 60
+    if config.settings_path:
+        assert json.loads(config.settings_path.read_text())["interval_seconds"] == 60

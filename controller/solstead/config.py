@@ -47,6 +47,8 @@ class Config:
     live_segment_seconds: int = 1
     live_idle_seconds: int = 20
     live_path: str | None = None
+    # Owner-adjustable settings (time-lapse) are stored beside config.json.
+    settings_path: Path | None = None
 
     @property
     def events_enabled(self) -> bool:
@@ -118,23 +120,27 @@ class Config:
             live_segment_seconds=int(data.get("live_segment_seconds", 1)),
             live_idle_seconds=int(data.get("live_idle_seconds", 20)),
             live_path=data.get("live_path") or None,
+            settings_path=Path(data["settings_path"]) if data.get("settings_path") else None,
         )
 
     @classmethod
     def load(cls, path: Path | str) -> Config:
+        path = Path(path)
         try:
-            data = json.loads(Path(path).read_text())
+            data = json.loads(path.read_text())
         except OSError as error:
             raise ConfigError(f"Cannot read configuration: {error}") from None
         except json.JSONDecodeError as error:
             raise ConfigError(f"Configuration is not valid JSON: {error}") from None
         if not isinstance(data, dict):
             raise ConfigError("Configuration must be a JSON object")
+        data.setdefault("settings_path", str(path.with_name("timelapse.json")))
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        for key in ("storage_path", "tls_cert", "tls_key"):
-            data[key] = str(data[key])
+        for key in ("storage_path", "tls_cert", "tls_key", "settings_path"):
+            if data[key] is not None:
+                data[key] = str(data[key])
         data["motion_topics"] = list(self.motion_topics)
         return data

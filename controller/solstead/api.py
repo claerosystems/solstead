@@ -5,17 +5,22 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import traceback
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 from . import __version__
 from .controller import Unavailable
+from .timelapse import TimeLapseError
 
 JSON = "application/json"
 CHUNK = 256 * 1024
 EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
+TIMELAPSE_DAY = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})$")
+TIMELAPSE_FRAME = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/(\d{6}\.jpg)$")
+TIMELAPSE_VIDEO = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/video\.mp4$")
 LIVE_TYPES = {
     ".m3u8": "application/vnd.apple.mpegurl",
     ".mp4": "video/mp4",
@@ -84,6 +89,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
+    def read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0 or length > 64 * 1024:
+            raise TimeLapseError("A JSON body is required")
+        try:
+            data = json.loads(self.rfile.read(length))
+        except ValueError:
+            raise TimeLapseError("Body is not valid JSON") from None
+        if not isinstance(data, dict):
+            raise TimeLapseError("Body must be a JSON object")
+        return data
+
     def authorized(self) -> bool:
         expected = "Bearer " + self.server.controller.config.api_token
         supplied = self.headers.get("Authorization", "")
@@ -108,6 +125,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(201, controller.record())
             if get and path == "/v1/events":
                 return self.reply(200, {"events": controller.events()})
+            if get and path == "/v1/timelapse":
+                return self.reply(
+                    200, {**controller.timelapse.status(), "days": controller.timelapse.days()}
+                )
+            if self.command == "PUT" and path == "/v1/timelapse":
+                return self.reply(200, controller.update_timelapse(self.read_json()))
+            day = TIMELAPSE_DAY.match(path)
+            if get and day:
+                frames = controller.timelapse.frames(day.group(1))
+                if not frames:
+                    return self.reply(404, {"error": "No frames for that day"})
+                return self.reply(
+                    200, {"date": day.group(1), "frames": [f.__dict__ for f in frames]}
+                )
+            frame = TIMELAPSE_FRAME.match(path)
+            if get and frame:
+                found = controller.timelapse.frame_path(frame.group(1), frame.group(2))
+                if not found:
+                    return self.reply(404, {"error": "Frame not found"})
+                return self.send_file(found, "image/jpeg")
+            video = TIMELAPSE_VIDEO.match(path)
+            if get and video:
+                return self.send_file(
+                    controller.timelapse.export_video(video.group(1)), "video/mp4"
+                )
             if self.command == "POST" and path == "/v1/live":
                 quality = query.get("quality", "low")
                 if quality not in ("low", "high"):
@@ -130,12 +172,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "Event not found"})
                 return self.send_file(found[1], "video/mp4")
             return self.reply(404, {"error": "Not found"})
+        except TimeLapseError as error:
+            return self.reply(400, {"error": str(error)})
         except Unavailable as error:
             return self.reply(503, {"error": str(error)})
         except OSError:
             return self.reply(503, {"error": "Storage operation failed"})
+        except Exception:  # never drop the connection or leak internals to the app
+            traceback.print_exc()
+            return self.reply(500, {"error": "Controller error; see the controller log"})
 
     do_GET = handle_request
     do_HEAD = handle_request
     do_POST = handle_request
+    do_PUT = handle_request
     do_DELETE = handle_request

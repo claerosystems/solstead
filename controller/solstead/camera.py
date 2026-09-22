@@ -64,11 +64,11 @@ class Camera:
         finally:
             self._lock.release()
 
-    def snapshot_from(self, path: Path) -> bytes:
+    def snapshot_from(self, path: Path, width: int | None = None) -> bytes:
         """First frame of a buffered segment, so the camera is not opened a second time."""
         args = [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(path),
-            "-frames:v", "1", "-an", "-vf", f"scale={self.snapshot_width}:-2",
+            "-frames:v", "1", "-an", "-vf", f"scale={width or self.snapshot_width}:-2",
             "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
         ]  # fmt: skip
         result = self._run(args, self.timeout, need_camera=False)
@@ -76,9 +76,9 @@ class Camera:
             raise CameraError("Buffered segment produced no image")
         return result.stdout
 
-    def snapshot(self) -> bytes:
+    def snapshot(self, width: int | None = None) -> bytes:
         args = self._base_args() + [
-            "-frames:v", "1", "-an", "-vf", f"scale={self.snapshot_width}:-2",
+            "-frames:v", "1", "-an", "-vf", f"scale={width or self.snapshot_width}:-2",
             "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
         ]  # fmt: skip
         result = self._run(args, self.timeout)
