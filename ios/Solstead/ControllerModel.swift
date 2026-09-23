@@ -24,8 +24,10 @@ final class ControllerModel: ObservableObject {
     @Published var showSettings = false
     @Published var healthEntries: [HealthEntry]?  // non-nil while the health sheet is shown
     @Published private(set) var snapshot: Snapshot?
-    @Published private(set) var message = "Connect to your controller on the same local network."
+    @Published var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
+    /// The recovery key being shown during encryption setup; never stored.
+    @Published var recoverySetup: RecoveryKey?
 
     private var client: ControllerClient?
 
@@ -122,7 +124,7 @@ final class ControllerModel: ObservableObject {
     func play(_ event: Event) async {
         await perform {
             message = "Downloading \(ByteCountFormatter.string(fromByteCount: event.sizeBytes, countStyle: .file)) clip…"
-            let url = try await connected().downloadEventClip(event)
+            let url = try await connected().downloadEventClip(event, identities: [DeviceKeyStore.load()].compactMap { $0 })
             playingClip = try PlayableClip(
                 title: event.started.formatted(date: .abbreviated, time: .shortened), downloaded: url,
                 exportName: "Solstead event \(PlayableClip.fileStamp.string(from: event.started))", recorded: event.started)
@@ -220,12 +222,12 @@ final class ControllerModel: ObservableObject {
 
     // MARK: - Internals
 
-    private func connected() throws -> ControllerClient {
+    func connected() throws -> ControllerClient {
         guard let client else { throw ControllerError.controller("Connect first.", status: 0) }
         return client
     }
 
-    private func load(with client: ControllerClient) async throws {
+    func load(with client: ControllerClient) async throws {
         let newStatus = try await client.status()
         // A missing SSD must still be visible on the health screen, so don't fail on listings.
         let clips = newStatus.storage.ready ? try await client.recordings() : []
@@ -237,7 +239,7 @@ final class ControllerModel: ObservableObject {
         timelapse = lapse
     }
 
-    private func perform(_ work: () async throws -> Void, onFailure: () -> Void = {}) async {
+    func perform(_ work: () async throws -> Void, onFailure: () -> Void = {}) async {
         busy = true
         defer { busy = false }
         do {

@@ -65,6 +65,9 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 PairingSection()
+                if let encryption = model.encryption {
+                    EncryptionSection(encryption: encryption)
+                }
                 if let lapse = model.timelapse {
                     TimeLapseSettingsSection(lapse: lapse)
                 }
@@ -86,6 +89,9 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done") { dismiss() } }
             .disabled(model.busy)
+            .sheet(isPresented: Binding(get: { model.recoverySetup != nil }, set: { if !$0 { model.cancelEncryptionSetup() } })) {
+                if let key = model.recoverySetup { RecoveryKeySetupView(key: key) }
+            }
         }
     }
 }
@@ -454,6 +460,10 @@ struct EventsSection: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            if event.isEncrypted {
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                                    .accessibilityLabel("Encrypted")
+                            }
                             Image(systemName: "play.circle")
                         }
                     }
