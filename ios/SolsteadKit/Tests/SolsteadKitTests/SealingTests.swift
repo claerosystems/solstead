@@ -200,12 +200,16 @@ final class SealingTests: XCTestCase {
          "size_bytes": 900, "trigger": "motion", "created_unix": 3, "duration_seconds": 3, "encrypted": true}
         """.utf8)
         let event = try ControllerJSON.decoder.decode(Event.self, from: eventJSON)
-        transport.responses = [(200, Data(#"{"events": []}"#.utf8)), (200, Data("age-encryption.org/v1\n".utf8)), (200, eventJSON)]
+        transport.responses = [(200, Data(#"{"events": []}"#.utf8)), (200, Data("age-encryption.org/v1\n".utf8)), (200, eventJSON),
+                               (200, Data(#"{"deleted": "e1"}"#.utf8))]
         _ = try await client.events(limit: 100000)
         XCTAssertEqual(transport.requests[0].url?.absoluteString, "https://solstead.local:8443/v1/events?limit=100000")
         _ = try await client.eventHeader(event)
         XCTAssertEqual(transport.requests[1].url?.path, "/v1/events/e1/header")
         try await client.replaceEventHeader(event, with: Data("header".utf8))
+        try await client.deleteEvent(event)
+        XCTAssertEqual(transport.requests[3].httpMethod, "DELETE")
+        XCTAssertEqual(transport.requests[3].url?.path, "/v1/events/e1")
         XCTAssertEqual(transport.requests[2].httpMethod, "PUT")
         XCTAssertEqual(transport.requests[2].value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
         XCTAssertEqual(transport.requests[2].httpBody, Data("header".utf8))

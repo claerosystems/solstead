@@ -20,6 +20,7 @@ JSON = "application/json"
 SEALED = "application/octet-stream"  # an age-encryption.org/v1 file the phone decrypts
 CHUNK = 256 * 1024
 EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
+EVENT = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)$")
 EVENT_HEADER = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/header$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
 TIMELAPSE_DAY = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})$")
@@ -192,6 +193,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "Live view is not running"})
                 content_type = LIVE_TYPES.get(found.suffix, "application/octet-stream")
                 return self.send_file(found, content_type, cache=False)
+            event = EVENT.match(path)
+            if event and self.command == "DELETE":
+                if not controller.delete_event(event.group(1)):
+                    return self.reply(404, {"error": "Event not found"})
+                return self.reply(200, {"deleted": event.group(1)})
             header = EVENT_HEADER.match(path)
             if header and get:
                 found = controller.event_header(header.group(1))

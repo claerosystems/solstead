@@ -46,7 +46,8 @@ class EventStore:
     def __init__(self, root: Path, allocation_bytes: int):
         self.folder = Path(root) / EVENTS_FOLDER
         self.allocation_bytes = allocation_bytes
-        self._lock = threading.Lock()  # header replacement (API thread) against pruning
+        # The API thread (delete, header replacement) against the loop (pruning, sealing).
+        self._lock = threading.Lock()
 
     def plain_path(self, event_id: str) -> Path:
         return self.folder / (event_id + ".mp4")
@@ -94,6 +95,14 @@ class EventStore:
     def delete(self, event_id: str) -> None:
         for suffix in (".mp4", ".mp4" + SEALED_SUFFIX, ".json"):
             (self.folder / (event_id + suffix)).unlink(missing_ok=True)
+
+    def remove(self, event_id: str) -> bool:
+        """The owner deleted an event: its clip and record go. False if there was no such event."""
+        with self._lock:
+            if self.load(event_id) is None:
+                return False
+            self.delete(event_id)
+            return True
 
     def header(self, event_id: str) -> bytes | None:
         """The age header of a sealed clip, for a key holder to re-wrap."""
@@ -148,6 +157,10 @@ class EventStore:
         The plaintext file is deleted afterwards, but an SSD does not guarantee the old blocks
         are erased, so footage recorded before enrolment may remain recoverable from the drive.
         """
+        with self._lock:
+            return self._seal_next_plain(recipients)
+
+    def _seal_next_plain(self, recipients: list[bytes]) -> Event | None:
         for event in self.events(limit=100000):
             if event.encrypted:
                 continue

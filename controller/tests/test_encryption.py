@@ -331,3 +331,22 @@ def test_events_list_accepts_a_limit(api):  # noqa: F811
         make_event(api.controller.store, f"e{i}", 1790000000 + i)
     assert len(json.loads(call(api, "GET", "/v1/events?limit=2")[1])["events"]) == 2
     assert len(json.loads(call(api, "GET", "/v1/events")[1])["events"]) == 3
+
+
+# ---- deleting events --------------------------------------------------------------------------
+
+
+def test_owner_deletes_plain_and_sealed_events(api):  # noqa: F811
+    store = api.controller.store
+    make_event(store, "plain", 1790000000)
+    _, pub = key()
+    sealed_event(store, "sealed", [sealing.parse_recipient(pub)])
+    for event_id in ("plain", "sealed"):
+        response, body = call(api, "DELETE", f"/v1/events/{event_id}")
+        assert response.status == 200 and json.loads(body) == {"deleted": event_id}
+    assert list(store.folder.iterdir()) == []
+    assert call(api, "DELETE", "/v1/events/plain")[0].status == 404
+    assert call(api, "DELETE", "/v1/events/../../etc")[0].status == 404
+    assert call(api, "DELETE", "/v1/events/x", token="wrong" * 8)[0].status == 401
+    logged = api.controller.health.recent(10, "info")
+    assert any(e["message"] == "Event deleted by the owner" for e in logged)

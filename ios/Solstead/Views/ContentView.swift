@@ -438,6 +438,7 @@ struct EventsSection: View {
     @EnvironmentObject private var model: ControllerModel
     let events: ControllerStatus.Events
     @State private var expanded = false
+    @State private var deleting: Event?
 
     var body: some View {
         Section {
@@ -469,6 +470,9 @@ struct EventsSection: View {
                         }
                     }
                     .foregroundStyle(.primary)
+                    .swipeActions {
+                        Button("Delete", systemImage: "trash", role: .destructive) { deleting = event }
+                    }
                 }
             } label: {
                 Text(model.events.isEmpty ? "Recorded events" : "Recorded events (\(model.events.count))")
@@ -476,7 +480,13 @@ struct EventsSection: View {
         } header: {
             Text("Events")
         } footer: {
-            Text("Clips start 10 seconds before detected activity and end 30 seconds after it. Oldest events are overwritten when the allocation is full.")
+            Text("Clips start 10 seconds before detected activity and end 30 seconds after it. Oldest events are overwritten when the allocation is full. Swipe left on an event to delete it.")
+        }
+        .confirmationDialog("Delete this event?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { event in
+            Button("Delete Event", role: .destructive) { Task { await model.delete(event) } }
+        } message: { event in
+            Text("The clip from \(event.started.formatted(date: .abbreviated, time: .shortened)) is removed from the controller and cannot be recovered. Copies you saved to Photos or shared are not affected.")
         }
     }
 

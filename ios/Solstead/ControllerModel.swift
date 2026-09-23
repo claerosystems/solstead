@@ -35,6 +35,8 @@ final class ControllerModel: ObservableObject {
     var isConnected: Bool { client != nil && status != nil }
 
     init() {
+        // Clips are only kept while they play; clear any left behind if the app was killed.
+        try? FileManager.default.removeItem(at: ControllerClient.clipFolder)
         if let saved = PairingStore.load() {
             url = saved.url.absoluteString
             token = saved.token
@@ -130,6 +132,16 @@ final class ControllerModel: ObservableObject {
                 title: event.started.formatted(date: .abbreviated, time: .shortened), downloaded: url,
                 exportName: "Solstead event \(PlayableClip.fileStamp.string(from: event.started))", recorded: event.started)
             message = "Playing event from \(event.started.formatted(date: .abbreviated, time: .shortened))."
+        }
+    }
+
+    /// Deletes an event from the controller. Copies already exported are not affected.
+    func delete(_ event: Event) async {
+        await perform {
+            try await connected().deleteEvent(event)
+            events.removeAll { $0.id == event.id }
+            try await load(with: try connected())
+            message = "Deleted the event from \(event.started.formatted(date: .abbreviated, time: .shortened))."
         }
     }
 

@@ -418,6 +418,15 @@ class Controller:
         self.storage.check()
         return [event.to_dict() for event in self.store.events(limit)]
 
+    def delete_event(self, event_id: str) -> bool:
+        self.storage.check()
+        event = self.store.load(event_id)
+        if not self.store.remove(event_id):
+            return False
+        self.health.record("info", "events", "Event deleted by the owner", event=event_id,
+                           encrypted=bool(event and event.encrypted))  # fmt: skip
+        return True
+
     def event_clip(self, event_id: str) -> tuple[Event, Path] | None:
         self.storage.check()
         event = self.store.load(event_id)

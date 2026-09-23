@@ -203,6 +203,7 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix}, …]}`, newest first, up to 200. |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD; returns its entry with status 201. |
 | `GET /v1/events[?limit=N]` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
+| `DELETE /v1/events/{id}` | The owner deletes an event: clip and record are removed and the deletion is logged. 404 if unknown. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |
 | `GET /v1/events/{id}/header` | Just the age header of a sealed clip (a few hundred bytes), for a key holder to re-wrap. 404 for unencrypted clips. |
 | `PUT /v1/events/{id}/header` | Replace a sealed clip's header with a re-wrapped one (raw bytes). Refused unless the body is exactly one age header that keeps every existing stanza; the payload is never touched. Returns the updated event. |

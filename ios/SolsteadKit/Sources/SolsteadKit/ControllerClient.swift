@@ -99,6 +99,16 @@ public struct ControllerClient: Sendable {
         try decode(EventList.self, from: await request("v1/events" + (limit.map { "?limit=\($0)" } ?? ""))).events
     }
 
+    /// Deletes an event's clip and record from the controller.
+    public func deleteEvent(_ event: Event) async throws {
+        _ = try await request("v1/events/\(event.id)", method: "DELETE")
+    }
+
+    /// Where downloaded clips are kept while they play. Anything left here is a leftover.
+    public static var clipFolder: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("solstead-clips", isDirectory: true)
+    }
+
     /// Just the age header of a sealed clip (a few hundred bytes), for re-wrapping.
     public func eventHeader(_ event: Event) async throws -> Data {
         try await request("v1/events/\(event.id)/header")
@@ -144,7 +154,7 @@ public struct ControllerClient: Sendable {
     }
 
     private func writeTemporary(_ data: Data, name: String) throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("solstead-clips", isDirectory: true)
+        let folder = Self.clipFolder
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
