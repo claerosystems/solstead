@@ -92,6 +92,7 @@ struct SettingsView: View {
             .sheet(isPresented: Binding(get: { model.recoverySetup != nil }, set: { if !$0 { model.cancelEncryptionSetup() } })) {
                 if let key = model.recoverySetup { RecoveryKeySetupView(key: key) }
             }
+            .sheet(isPresented: $model.showRestore) { RestoreAccessView() }
         }
     }
 }

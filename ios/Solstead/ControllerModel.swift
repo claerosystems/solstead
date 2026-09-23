@@ -28,6 +28,7 @@ final class ControllerModel: ObservableObject {
     @Published private(set) var busy = false
     /// The recovery key being shown during encryption setup; never stored.
     @Published var recoverySetup: RecoveryKey?
+    @Published var showRestore = false
 
     private var client: ControllerClient?
 

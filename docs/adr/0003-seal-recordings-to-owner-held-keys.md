@@ -27,4 +27,6 @@ Consequences:
 
 Setup confirmation (2026-09-22): after printing or saving, the owner types back two randomly chosen five-character groups of the key before enrolment. The printout carries the grouped code, a QR code of the same key, the controller name and date, and the `age` command.
 
-Open: whether the owner can view footage from a new phone by scanning the recovery key; how time-lapse frames are sealed and assembled on the phone; how viewers' keys are added once viewers exist.
+Restoring access (2026-09-22): a new phone takes the recovery key (typed, from the saved file, or scanned from the printout's QR code), checks it against the enrolled recovery public key, enrols its own device key, and re-wraps every older sealed clip's header to add itself. Only headers move; the controller accepts a replacement header only if it keeps every existing stanza and leaves the payload untouched. The phone does not keep the recovery key. Clips sealed under an earlier recovery key stay locked to that key.
+
+Open: how time-lapse frames are sealed and assembled on the phone; how viewers' keys are added once viewers exist.

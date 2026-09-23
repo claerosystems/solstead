@@ -24,12 +24,14 @@ struct EncryptionSection: View {
                 if let waiting = encryption.unencryptedEvents, waiting > 0 {
                     LabeledContent("Older clips to encrypt", value: "\(waiting)")
                 }
+                Button(model.thisPhoneEnrolled ? "Unlock older recordings with recovery key" : "Restore access with recovery key",
+                       systemImage: "key") { model.showRestore = true }
             }
         } header: {
             Text("Encryption")
         } footer: {
             Text(encryption.enrolled
-                 ? "Recordings are encrypted on the controller. Only this phone or your recovery key can open them; the controller itself cannot, so a stolen controller or drive reveals nothing."
+                 ? "Recordings are encrypted on the controller. Only enrolled phones and your recovery key can open them; the controller itself cannot, so a stolen controller or drive reveals nothing."
                  : "When on, recordings are encrypted on the controller so only your phone or your recovery key can open them. Setup asks you to print or save a recovery key.")
         }
         .confirmationDialog("Turn off encryption?", isPresented: $confirmingOff, titleVisibility: .visible) {

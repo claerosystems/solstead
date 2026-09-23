@@ -17,7 +17,7 @@ public enum SealingError: LocalizedError, Equatable {
         case .malformedKey(let reason): return reason
         case .notSealed: return "This file is not an encrypted Solstead recording."
         case .malformedHeader: return "The encrypted recording is damaged."
-        case .noMatchingKey: return "None of this phone's keys can open this recording."
+        case .noMatchingKey: return "This phone can't open this recording yet. Use Restore access in Settings with your recovery key."
         case .headerAltered, .payloadAltered: return "The encrypted recording is damaged or has been altered."
         }
     }
@@ -206,6 +206,61 @@ public enum Age {
             if last { break }
         } while true
         return out
+    }
+
+    // MARK: Re-wrapping (restoring access on a new phone)
+
+    /// Whether any of `identities` opens a file with this header.
+    public static func canOpen(header: Data, with identities: [AgeIdentity]) -> Bool {
+        (try? fileKey(header: header, identities: identities)) != nil
+    }
+
+    /// A copy of `header` that also lets `recipient` open the file, made with a key that already
+    /// can (the recovery key). Every existing stanza is kept, so nobody loses access.
+    public static func rewrap(header: Data, using identity: AgeIdentity, adding recipient: String) throws -> Data {
+        let (stanzas, key) = try fileKey(header: header, identities: [identity])
+        let theirs = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: try AgeIdentity.recipientKey(recipient))
+        let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+        let share = ephemeral.publicKey.rawRepresentation
+        let shared = try ephemeral.sharedSecretFromKeyAgreement(with: theirs).withUnsafeBytes { Data($0) }
+        let wrapKey = hkdf(shared, salt: share + theirs.rawRepresentation, info: x25519Info)
+        let body = try aead(wrapKey, nonce: Data(count: 12), seal: key)
+        var head = intro + stanzas.reduce(Data(), +) + Data("-> X25519 \(b64(share))\n\(b64(body))\n".utf8)
+        head += Data("---".utf8)
+        let mac = Data(HMAC<SHA256>.authenticationCode(for: head, using: hkdf(key, salt: Data(), info: Data("header".utf8))))
+        return head + Data(" \(b64(mac))\n".utf8)
+    }
+
+    /// The raw stanzas and the file key, after checking the header MAC.
+    static func fileKey(header: Data, identities: [AgeIdentity]) throws -> (stanzas: [Data], key: Data) {
+        guard header.starts(with: intro), header.last == 0x0A else { throw SealingError.malformedHeader }
+        var lines = header.dropFirst(intro.count).split(separator: 0x0A, omittingEmptySubsequences: false).map { Data($0) }
+        lines.removeLast()  // the empty string after the final newline
+        var stanzas: [Data] = []
+        var fileKey: Data?
+        var index = 0
+        while index < lines.count, lines[index].starts(with: Data("-> ".utf8)) {
+            let opener = lines[index]
+            var raw = opener + Data([0x0A])
+            var body = Data()
+            index += 1
+            while index < lines.count {
+                let part = lines[index]
+                raw += part + Data([0x0A])
+                body += try unb64(part)
+                index += 1
+                if part.count < 64 { break }
+            }
+            stanzas.append(raw)
+            let args = opener.dropFirst(3).split(separator: 0x20, omittingEmptySubsequences: false).map { Data($0) }
+            if fileKey == nil { fileKey = try unwrap(args: args, body: body, identities: identities) }
+        }
+        guard index == lines.count - 1, lines[index].starts(with: Data("--- ".utf8)) else { throw SealingError.malformedHeader }
+        guard let fileKey else { throw SealingError.noMatchingKey }
+        let signed = intro + stanzas.reduce(Data(), +) + Data("---".utf8)
+        let expected = Data(HMAC<SHA256>.authenticationCode(for: signed, using: hkdf(fileKey, salt: Data(), info: Data("header".utf8))))
+        guard try unb64(lines[index].dropFirst(4)) == expected else { throw SealingError.headerAltered }
+        return (stanzas, fileKey)
     }
 
     // MARK: Internals

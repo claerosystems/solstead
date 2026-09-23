@@ -95,8 +95,20 @@ public struct ControllerClient: Sendable {
         try decode(HealthList.self, from: await request("v1/health?level=\(minimumLevel)&limit=\(limit)")).entries
     }
 
-    public func events() async throws -> [Event] {
-        try decode(EventList.self, from: await request("v1/events")).events
+    public func events(limit: Int? = nil) async throws -> [Event] {
+        try decode(EventList.self, from: await request("v1/events" + (limit.map { "?limit=\($0)" } ?? ""))).events
+    }
+
+    /// Just the age header of a sealed clip (a few hundred bytes), for re-wrapping.
+    public func eventHeader(_ event: Event) async throws -> Data {
+        try await request("v1/events/\(event.id)/header")
+    }
+
+    /// Replaces a sealed clip's header with one that adds a recipient; returns the updated event.
+    @discardableResult
+    public func replaceEventHeader(_ event: Event, with header: Data) async throws -> Event {
+        try decode(Event.self, from: await request("v1/events/\(event.id)/header", method: "PUT", body: header,
+                                                     contentType: "application/octet-stream"))
     }
 
     /// Downloads an event clip to a temporary file and returns its URL. AVPlayer cannot use the
@@ -146,7 +158,7 @@ public struct ControllerClient: Sendable {
 
     // MARK: - Internals
 
-    func makeRequest(_ path: String, method: String, body: Data? = nil) -> URLRequest {
+    func makeRequest(_ path: String, method: String, body: Data? = nil, contentType: String = "application/json") -> URLRequest {
         let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
         var url = pairing.url.appendingPathComponent(parts[0])
         if parts.count == 2, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
@@ -159,13 +171,14 @@ public struct ControllerClient: Sendable {
         request.setValue("application/json, image/jpeg", forHTTPHeaderField: "Accept")
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         return request
     }
 
-    private func request(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
-        let (data, response) = try await transport.send(makeRequest(path, method: method, body: body))
+    private func request(_ path: String, method: String = "GET", body: Data? = nil,
+                         contentType: String = "application/json") async throws -> Data {
+        let (data, response) = try await transport.send(makeRequest(path, method: method, body: body, contentType: contentType))
         guard let http = response as? HTTPURLResponse else { throw ControllerError.unexpectedResponse(status: 0) }
         guard (200..<300).contains(http.statusCode) else {
             if let body = try? ControllerJSON.decoder.decode(ErrorBody.self, from: data) {

@@ -259,6 +259,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Solstead;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan the QR code on your printed recovery key.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your Solstead controller to view camera snapshots, recordings and storage health.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save camera snapshots and clips you export to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -290,6 +291,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Solstead;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan the QR code on your printed recovery key.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your Solstead controller to view camera snapshots, recordings and storage health.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save camera snapshots and clips you export to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

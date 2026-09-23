@@ -145,4 +145,69 @@ final class SealingTests: XCTestCase {
             XCTAssertEqual(error as? SealingError, .noMatchingKey)
         }
     }
+
+    // MARK: Restoring access
+
+    func header(of sealed: Data) -> Data {
+        let end = sealed.range(of: Data("\n---".utf8))!.upperBound
+        let newline = sealed[end...].firstIndex(of: 0x0A)!
+        return sealed[..<(newline + 1)]
+    }
+
+    func testRewrapLetsANewPhoneOpenAnOlderClipAndKeepsEveryoneElse() throws {
+        let oldPhone = AgeIdentity(), recovery = AgeIdentity(), newPhone = AgeIdentity()
+        let data = Age.randomBytes(150_000)
+        let sealed = try Age.seal(data, to: [oldPhone.recipient, recovery.recipient])
+        let old = header(of: sealed)
+        XCTAssertFalse(Age.canOpen(header: old, with: [newPhone]))
+        XCTAssertTrue(Age.canOpen(header: old, with: [recovery]))
+
+        let rewrapped = try Age.rewrap(header: old, using: recovery, adding: newPhone.recipient)
+        XCTAssertTrue(rewrapped.starts(with: old.prefix(old.count - 50)), "existing stanzas are kept first")
+        let updated = rewrapped + sealed.dropFirst(old.count)
+        for identity in [newPhone, oldPhone, recovery] {
+            XCTAssertEqual(try Age.open(updated, with: [identity]), data)
+        }
+        XCTAssertTrue(Age.canOpen(header: rewrapped, with: [newPhone]))
+    }
+
+    func testRewrapOfAControllerSealedClip() throws {
+        let sealed = try XCTUnwrap(Data(base64Encoded: controllerSealed))
+        let recovery = try AgeIdentity(string: controllerIdentity), newPhone = AgeIdentity()
+        let old = header(of: sealed)
+        let updated = try Age.rewrap(header: old, using: recovery, adding: newPhone.recipient) + sealed.dropFirst(old.count)
+        XCTAssertEqual(String(decoding: try Age.open(updated, with: [newPhone]), as: UTF8.self),
+                       String(repeating: "Solstead event clip ", count: 10))
+    }
+
+    func testRewrapRefusesAWrongKeyOrAlteredHeader() throws {
+        let owner = AgeIdentity()
+        var old = header(of: try Age.seal(Data("x".utf8), to: [owner.recipient]))
+        XCTAssertThrowsError(try Age.rewrap(header: old, using: AgeIdentity(), adding: owner.recipient)) {
+            XCTAssertEqual($0 as? SealingError, .noMatchingKey)
+        }
+        old[old.count - 5] = old[old.count - 5] == UInt8(ascii: "A") ? UInt8(ascii: "B") : UInt8(ascii: "A")
+        XCTAssertThrowsError(try Age.rewrap(header: old, using: owner, adding: AgeIdentity().recipient))
+    }
+
+    func testClientHeaderCallsAndEventLimit() async throws {
+        let transport = StubTransport()
+        let pairing = try Pairing(url: "https://solstead.local:8443", token: String(repeating: "k", count: 32),
+                                  fingerprint: String(repeating: "cd", count: 32))
+        let client = ControllerClient(pairing: pairing, transport: transport)
+        let eventJSON = Data("""
+        {"id": "e1", "started_unix": 1, "ended_unix": 2, "clip_from_unix": 0, "clip_to_unix": 3,
+         "size_bytes": 900, "trigger": "motion", "created_unix": 3, "duration_seconds": 3, "encrypted": true}
+        """.utf8)
+        let event = try ControllerJSON.decoder.decode(Event.self, from: eventJSON)
+        transport.responses = [(200, Data(#"{"events": []}"#.utf8)), (200, Data("age-encryption.org/v1\n".utf8)), (200, eventJSON)]
+        _ = try await client.events(limit: 100000)
+        XCTAssertEqual(transport.requests[0].url?.absoluteString, "https://solstead.local:8443/v1/events?limit=100000")
+        _ = try await client.eventHeader(event)
+        XCTAssertEqual(transport.requests[1].url?.path, "/v1/events/e1/header")
+        try await client.replaceEventHeader(event, with: Data("header".utf8))
+        XCTAssertEqual(transport.requests[2].httpMethod, "PUT")
+        XCTAssertEqual(transport.requests[2].value(forHTTPHeaderField: "Content-Type"), "application/octet-stream")
+        XCTAssertEqual(transport.requests[2].httpBody, Data("header".utf8))
+    }
 }
