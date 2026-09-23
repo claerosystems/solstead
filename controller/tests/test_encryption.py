@@ -235,3 +235,99 @@ def test_turning_encryption_off_keeps_sealed_clips_and_records_plain(api):  # no
     assert api.controller.recipients.keys() == []
     assert api.controller.store.events()[0].encrypted  # already sealed stays sealed
     assert call(api, "DELETE", "/v1/encryption")[0].status == 200  # idempotent
+
+
+# ---- restoring access: re-wrapping older clips for a new phone ----------------------------------
+
+
+def header_of(sealed: bytes) -> bytes:
+    from io import BytesIO
+
+    return sealing.read_header(BytesIO(sealed))[0]
+
+
+def sealed_event(store, event_id, recipients, data=b"footage" * 20000):
+    store.folder.mkdir(parents=True, exist_ok=True)
+    sealed = sealing.seal_bytes(data, recipients)
+    store.sealed_path(event_id).write_bytes(sealed)
+    event = make_event(store, event_id, 1790085605, size=len(sealed))
+    (store.folder / (event_id + ".json")).write_text(
+        json.dumps({**event.__dict__, "encrypted": True})
+    )
+    store.plain_path(event_id).unlink()
+    return data
+
+
+def put_raw(server, path, body: bytes):
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    conn.request("PUT", path, body=body, headers={"Authorization": "Bearer " + TOKEN})
+    response = conn.getresponse()
+    data = json.loads(response.read())
+    conn.close()
+    return response, data
+
+
+def test_new_phone_gains_access_to_an_older_clip_by_rewrapping_its_header(api):  # noqa: F811
+    store = api.controller.store
+    (old_phone, old_pub), (recovery, recovery_pub), (new_phone, new_pub) = key(), key(), key()
+    old_keys = [sealing.parse_recipient(old_pub), sealing.parse_recipient(recovery_pub)]
+    data = sealed_event(store, "e1", old_keys)
+    with pytest.raises(sealing.SealingError):
+        sealing.open_bytes(store.sealed_path("e1").read_bytes(), new_phone)
+
+    response, header = call(api, "GET", "/v1/events/e1/header")
+    assert response.status == 200 and header.startswith(b"age-encryption.org/v1\n")
+    assert header.endswith(b"\n") and store.sealed_path("e1").read_bytes().startswith(header)
+    assert len(header) < 1024  # only the header travels, never the video
+
+    rewrapped = sealing.rewrap_header(header, recovery, sealing.parse_recipient(new_pub))
+    response, body = put_raw(api, "/v1/events/e1/header", rewrapped)
+    assert response.status == 200 and body["encrypted"] is True
+    sealed = store.sealed_path("e1").read_bytes()
+    assert body["size_bytes"] == len(sealed)
+    for secret in (new_phone, old_phone, recovery):
+        assert sealing.open_bytes(sealed, secret) == data
+    assert not list(store.folder.glob("*.partial"))
+
+
+def test_header_replacement_cannot_drop_keys_or_touch_the_payload(api):  # noqa: F811
+    store = api.controller.store
+    (_, a_pub), (recovery, recovery_pub), (_, other_pub) = key(), key(), key()
+    sealed_event(
+        store, "e1", [sealing.parse_recipient(a_pub), sealing.parse_recipient(recovery_pub)]
+    )
+    before = store.sealed_path("e1").read_bytes()
+    header = call(api, "GET", "/v1/events/e1/header")[1]
+
+    # A header for a different file key that lists only the recovery key: drops a recipient.
+    only_recovery = header_of(sealing.seal_bytes(b"x", [sealing.parse_recipient(recovery_pub)]))
+    response, body = put_raw(api, "/v1/events/e1/header", only_recovery)
+    assert response.status == 400 and "every existing key" in body["error"]
+
+    # Trailing payload bytes smuggled after the header are refused.
+    grown = sealing.rewrap_header(header, recovery, sealing.parse_recipient(other_pub))
+    response, body = put_raw(api, "/v1/events/e1/header", grown + b"extra")
+    assert response.status == 400
+    response, _ = put_raw(api, "/v1/events/e1/header", b"not a header\n")
+    assert response.status == 400
+    assert store.sealed_path("e1").read_bytes() == before  # nothing changed on refusal
+
+    make_event(store, "plain", 1790000000)
+    assert call(api, "GET", "/v1/events/plain/header")[0].status == 404
+    assert put_raw(api, "/v1/events/plain/header", grown)[0].status == 404
+    assert call(api, "GET", "/v1/events/missing/header")[0].status == 404
+
+
+def test_rewrap_refuses_a_key_that_cannot_open_the_file():
+    (_, pub), (stranger, _) = key(), key()
+    sealed = sealing.seal_bytes(b"x", [sealing.parse_recipient(pub)])
+    header = header_of(sealed)
+    with pytest.raises(sealing.SealingError, match="cannot open"):
+        sealing.rewrap_header(header, stranger, sealing.parse_recipient(pub))
+
+
+def test_events_list_accepts_a_limit(api):  # noqa: F811
+    for i in range(3):
+        make_event(api.controller.store, f"e{i}", 1790000000 + i)
+    assert len(json.loads(call(api, "GET", "/v1/events?limit=2")[1])["events"]) == 2
+    assert len(json.loads(call(api, "GET", "/v1/events")[1])["events"]) == 3

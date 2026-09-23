@@ -239,6 +239,40 @@ def _unwrap(args: list[bytes], body: bytes, secret: bytes) -> bytes | None:
         return None
 
 
+MAX_HEADER = 16 * 1024
+
+
+def read_header(source: BinaryIO) -> tuple[bytes, list[bytes]]:
+    """The header through its MAC line, and each stanza's raw bytes. Needs no key.
+
+    Used to swap a file's header for one a key holder re-wrapped, without touching the payload.
+    """
+    header = _read_line(source) + b"\n"
+    if header != INTRO:
+        raise SealingError("Not an age v1 file")
+    stanzas = []
+    while True:
+        line = _read_line(source)
+        if line.startswith(b"--- "):
+            _unb64(line[4:])
+            header += line + b"\n"
+            return header, stanzas
+        if not line.startswith(b"-> "):
+            raise SealingError("Malformed header stanza")
+        stanza = line + b"\n"
+        while True:
+            part = _read_line(source)
+            if part:
+                _unb64(part)  # validates; stanza bodies stay opaque to the controller
+            stanza += part + b"\n"
+            if len(part) < 64:
+                break
+        stanzas.append(stanza)
+        header += stanza
+        if len(header) > MAX_HEADER:
+            raise SealingError("Header is too long")
+
+
 def open_stream(source: BinaryIO, target: BinaryIO, identity: bytes) -> None:
     head = _read_line(source) + b"\n"
     if head != INTRO:
@@ -286,6 +320,28 @@ def open_stream(source: BinaryIO, target: BinaryIO, identity: bytes) -> None:
         if last:
             return
         chunk, counter = following, counter + 1
+
+
+def rewrap_header(header: bytes, identity: bytes, add: bytes) -> bytes:
+    """Add a recipient to a header using a key that already opens it. Tests and bench tools;
+    the phone does this when restoring access from the recovery key."""
+    from io import BytesIO
+
+    _, stanzas = read_header(BytesIO(header))
+    file_key = None
+    for stanza in stanzas:
+        lines = stanza.rstrip(b"\n").split(b"\n")
+        body = b"".join(_unb64(x) for x in lines[1:] if x)
+        file_key = file_key or _unwrap(lines[0][3:].split(b" "), body, identity)
+    if file_key is None:
+        raise SealingError("This key cannot open the file")
+    mac_key = _hkdf(file_key, b"", b"header")
+    old = INTRO + b"".join(stanzas) + b"---"
+    old_mac = _unb64(header[len(old) + 1 : -1])
+    if not hmac.compare_digest(hmac.new(mac_key, old, hashlib.sha256).digest(), old_mac):
+        raise SealingError("Header has been altered")
+    head = INTRO + b"".join(stanzas) + _wrap(file_key, add) + b"---"
+    return head + b" " + _b64(hmac.new(mac_key, head, hashlib.sha256).digest()) + b"\n"
 
 
 def open_bytes(data: bytes, identity: bytes) -> bytes:

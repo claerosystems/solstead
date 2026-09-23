@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -12,8 +14,8 @@ from pathlib import Path
 
 from .buffer import SegmentBuffer
 from .clips import ClipError, assemble
+from .sealing import MAX_HEADER, SealingError, read_header, seal_file
 from .sealing import SUFFIX as SEALED_SUFFIX
-from .sealing import seal_file
 
 EVENTS_FOLDER = "events"
 
@@ -44,6 +46,7 @@ class EventStore:
     def __init__(self, root: Path, allocation_bytes: int):
         self.folder = Path(root) / EVENTS_FOLDER
         self.allocation_bytes = allocation_bytes
+        self._lock = threading.Lock()  # header replacement (API thread) against pruning
 
     def plain_path(self, event_id: str) -> Path:
         return self.folder / (event_id + ".mp4")
@@ -92,6 +95,53 @@ class EventStore:
         for suffix in (".mp4", ".mp4" + SEALED_SUFFIX, ".json"):
             (self.folder / (event_id + suffix)).unlink(missing_ok=True)
 
+    def header(self, event_id: str) -> bytes | None:
+        """The age header of a sealed clip, for a key holder to re-wrap."""
+        event = self.load(event_id)
+        if event is None or not event.encrypted or not self.clip_path(event).is_file():
+            return None
+        with self.clip_path(event).open("rb") as file:
+            return read_header(file)[0]
+
+    def replace_header(self, event_id: str, new_header: bytes) -> Event | None:
+        """Swap a sealed clip's header for a re-wrapped one that keeps every existing stanza.
+
+        The controller cannot check the header MAC (it has no key), but it can refuse anything
+        that would drop a recipient or touch the payload.
+        """
+        from io import BytesIO
+
+        with self._lock:
+            event = self.load(event_id)
+            if event is None or not event.encrypted or not self.clip_path(event).is_file():
+                return None
+            if len(new_header) > MAX_HEADER:
+                raise SealingError("Header is too long")
+            parsed, stanzas = read_header(BytesIO(new_header))
+            if parsed != new_header:
+                raise SealingError("Body must be exactly one age header")
+            path = self.clip_path(event)
+            partial = path.with_name(path.name + ".partial")
+            with path.open("rb") as old:
+                _, old_stanzas = read_header(old)
+                missing = [s for s in old_stanzas if s not in stanzas]
+                if missing:
+                    raise SealingError("The new header must keep every existing key")
+                try:
+                    with partial.open("wb") as new:
+                        new.write(new_header)
+                        while chunk := old.read(1024 * 1024):
+                            new.write(chunk)
+                        new.flush()
+                        os.fsync(new.fileno())
+                except BaseException:
+                    partial.unlink(missing_ok=True)
+                    raise
+            partial.rename(path)
+            updated = replace(event, size_bytes=path.stat().st_size)
+            (self.folder / (event.id + ".json")).write_text(json.dumps(asdict(updated)))
+            return updated
+
     def seal_next_plain(self, recipients: list[bytes]) -> Event | None:
         """Seal one clip recorded before keys were enrolled; None when there are none left.
 
@@ -113,6 +163,10 @@ class EventStore:
 
     def prune(self) -> list[str]:
         """Delete oldest events until the allocation fits. Returns deleted ids."""
+        with self._lock:
+            return self._prune()
+
+    def _prune(self) -> list[str]:
         deleted = []
         events = self.events(limit=100000)
         used = self.used_bytes()

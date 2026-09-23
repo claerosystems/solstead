@@ -13,12 +13,14 @@ from urllib.parse import parse_qsl, urlsplit
 from . import __version__
 from .controller import Unavailable
 from .recipients import RecipientsError
+from .sealing import MAX_HEADER, SealingError
 from .timelapse import TimeLapseError
 
 JSON = "application/json"
 SEALED = "application/octet-stream"  # an age-encryption.org/v1 file the phone decrypts
 CHUNK = 256 * 1024
 EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
+EVENT_HEADER = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/header$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
 TIMELAPSE_DAY = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})$")
 TIMELAPSE_FRAME = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/(\d{6}\.jpg)$")
@@ -134,7 +136,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "POST" and path == "/v1/recordings":
                 return self.reply(201, controller.record())
             if get and path == "/v1/events":
-                return self.reply(200, {"events": controller.events()})
+                limit = min(max(int(query.get("limit", "200") or 200), 1), 100000)
+                return self.reply(200, {"events": controller.events(limit)})
             if get and path == "/v1/encryption":
                 return self.reply(200, controller.encryption_status())
             if self.command == "PUT" and path == "/v1/encryption":
@@ -189,6 +192,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "Live view is not running"})
                 content_type = LIVE_TYPES.get(found.suffix, "application/octet-stream")
                 return self.send_file(found, content_type, cache=False)
+            header = EVENT_HEADER.match(path)
+            if header and get:
+                found = controller.event_header(header.group(1))
+                if found is None:
+                    return self.reply(404, {"error": "No encrypted clip for that event"})
+                return self.reply(200, found, SEALED)
+            if header and self.command == "PUT":
+                length = int(self.headers.get("Content-Length") or 0)
+                if not 0 < length <= MAX_HEADER:
+                    return self.reply(400, {"error": "An age header body is required"})
+                updated = controller.replace_event_header(header.group(1), self.rfile.read(length))
+                if updated is None:
+                    return self.reply(404, {"error": "No encrypted clip for that event"})
+                return self.reply(200, updated)
             clip = EVENT_CLIP.match(path)
             if get and clip:
                 found = controller.event_clip(clip.group(1))
@@ -196,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "Event not found"})
                 return self.send_file(found[1], SEALED if found[0].encrypted else "video/mp4")
             return self.reply(404, {"error": "Not found"})
-        except (TimeLapseError, RecipientsError) as error:
+        except (TimeLapseError, RecipientsError, SealingError) as error:
             return self.reply(400, {"error": str(error)})
         except Unavailable as error:
             return self.reply(503, {"error": str(error)})

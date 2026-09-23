@@ -109,7 +109,10 @@ SSD as `<id>.mp4.age`; plaintext video never reaches the SSD. Clips recorded bef
 sealed one at a time in the background (their old blocks may survive on the drive). The
 controller holds no key that can decrypt anything.
 
-Encryption is the owner's choice (a switch in the app's Settings). `DELETE /v1/encryption` turns it
+A new phone restores access with the recovery key: the app enrols its own key, then for each
+sealed clip fetches the header, adds a stanza for itself using the recovery key, and puts the
+header back (`/v1/events/{id}/header`). Only headers travel; the controller still never sees a
+private key. Encryption is the owner's choice (a switch in the app's Settings). `DELETE /v1/encryption` turns it
 off; clips already sealed stay sealed, since the controller cannot decrypt them. Until keys are
 enrolled, event clips are stored unencrypted as before and `GET /v1/status` reports
 `encryption.enrolled: false`. Manual test clips and time-lapse frames are not sealed yet.
@@ -199,8 +202,10 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/camera/snapshot[?width=N]` | One JPEG frame (`image/jpeg`) at `snapshot_width` by default; `width=0` returns the camera's full resolution, taken from the buffer. |
 | `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix}, …]}`, newest first, up to 200. |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD; returns its entry with status 201. |
-| `GET /v1/events` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
+| `GET /v1/events[?limit=N]` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |
+| `GET /v1/events/{id}/header` | Just the age header of a sealed clip (a few hundred bytes), for a key holder to re-wrap. 404 for unencrypted clips. |
+| `PUT /v1/events/{id}/header` | Replace a sealed clip's header with a re-wrapped one (raw bytes). Refused unless the body is exactly one age header that keeps every existing stanza; the payload is never touched. Returns the updated event. |
 | `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events}`. Also in the status as `encryption`. |
 | `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
 | `DELETE /v1/encryption` | Turn encryption off: forget the enrolled keys so new recordings are stored unencrypted. Clips already sealed stay sealed. |

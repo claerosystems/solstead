@@ -414,9 +414,9 @@ class Controller:
         self.live.touch()
         return self.live.file(name)
 
-    def events(self) -> list[dict]:
+    def events(self, limit: int = 200) -> list[dict]:
         self.storage.check()
-        return [event.to_dict() for event in self.store.events()]
+        return [event.to_dict() for event in self.store.events(limit)]
 
     def event_clip(self, event_id: str) -> tuple[Event, Path] | None:
         self.storage.check()
@@ -427,6 +427,16 @@ class Controller:
         return (event, path) if path.is_file() else None
 
     # ---- encryption ----------------------------------------------------------------------
+
+    def event_header(self, event_id: str) -> bytes | None:
+        self.storage.check()
+        return self.store.header(event_id)
+
+    def replace_event_header(self, event_id: str, header: bytes) -> dict | None:
+        """A key holder added a recipient to an older clip (restoring access on a new phone)."""
+        self.storage.check()
+        event = self.store.replace_header(event_id, header)
+        return event.to_dict() if event else None
 
     def encryption_status(self) -> dict:
         status = self.recipients.status()
