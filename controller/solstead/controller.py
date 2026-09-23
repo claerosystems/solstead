@@ -448,5 +448,14 @@ class Controller:
         )  # fmt: skip
         return self.encryption_status()
 
+    def disable_encryption(self) -> dict:
+        """The owner turned encryption off: new recordings are stored unencrypted."""
+        if self.recipients.enrolled:
+            self.recipients.clear()
+            self.health.record(
+                "warning", "encryption", "Encryption turned off; new recordings are not encrypted"
+            )
+        return self.encryption_status()
+
 
 Unavailable = (StorageUnavailable, CameraError)

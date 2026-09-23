@@ -91,6 +91,12 @@ class RecipientStore:
         partial.replace(self.path)
         self.recipients = list(recipients)
 
+    def clear(self) -> None:
+        """Stop sealing new recordings. Files already sealed stay sealed."""
+        if self.path:
+            self.path.unlink(missing_ok=True)
+        self.recipients = []
+
     def status(self) -> dict:
         return {
             "enrolled": self.enrolled,

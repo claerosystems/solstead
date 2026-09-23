@@ -221,3 +221,17 @@ def test_cli_keygen_then_decrypt(tmp_path, capsys):
     other.write_text(sealing.generate_identity()[0])
     assert main(["decrypt", str(other), str(sealed), str(tmp_path / "x.mp4")]) == 1
     assert "cannot open" in capsys.readouterr().err
+
+
+def test_turning_encryption_off_keeps_sealed_clips_and_records_plain(api):  # noqa: F811
+    _, payload = enrolment("device", "recovery")
+    put(api, "/v1/encryption", payload)
+    make_event(api.controller.store, "20260922T140005-abcdef01", 1790085605, size=10)
+    api.controller._seal_backlog()
+    response, body = call(api, "DELETE", "/v1/encryption")
+    status = json.loads(body)
+    assert response.status == 200 and status["enrolled"] is False and status["recipients"] == []
+    assert not api.controller.config.recipients_path.exists()
+    assert api.controller.recipients.keys() == []
+    assert api.controller.store.events()[0].encrypted  # already sealed stays sealed
+    assert call(api, "DELETE", "/v1/encryption")[0].status == 200  # idempotent

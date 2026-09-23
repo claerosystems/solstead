@@ -109,7 +109,9 @@ SSD as `<id>.mp4.age`; plaintext video never reaches the SSD. Clips recorded bef
 sealed one at a time in the background (their old blocks may survive on the drive). The
 controller holds no key that can decrypt anything.
 
-Until keys are enrolled, event clips are stored unencrypted as before and `GET /v1/status` reports
+Encryption is the owner's choice (a switch in the app's Settings). `DELETE /v1/encryption` turns it
+off; clips already sealed stay sealed, since the controller cannot decrypt them. Until keys are
+enrolled, event clips are stored unencrypted as before and `GET /v1/status` reports
 `encryption.enrolled: false`. Manual test clips and time-lapse frames are not sealed yet.
 
 Any age implementation opens a sealed clip. For bench checks without the app:
@@ -201,6 +203,7 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |
 | `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events}`. Also in the status as `encryption`. |
 | `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
+| `DELETE /v1/encryption` | Turn encryption off: forget the enrolled keys so new recordings are stored unencrypted. Clips already sealed stay sealed. |
 | `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames. |
 | `PUT /v1/timelapse` | Change `enabled`, `interval_seconds`, `window` (and `width`, `allocation_bytes`, `export_fps`); JSON body. |
 | `GET /v1/timelapse/{date}` | That day's frames (`name`, `unix`, `size_bytes`). |

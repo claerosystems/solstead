@@ -139,6 +139,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, controller.encryption_status())
             if self.command == "PUT" and path == "/v1/encryption":
                 return self.reply(200, controller.enroll(self.read_json()))
+            if self.command == "DELETE" and path == "/v1/encryption":
+                return self.reply(200, controller.disable_encryption())
             if get and path == "/v1/health":
                 level = query.get("level", "info")
                 if level not in ("info", "warning", "error"):
