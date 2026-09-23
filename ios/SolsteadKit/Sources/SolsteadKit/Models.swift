@@ -43,6 +43,7 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let timelapse: TimeLapseStatus?
     public let health: Health?
     public let thermal: Thermal?
+    public let encryption: EncryptionStatus?
     public let recordingMode: String
     public let remoteAccess: Bool
 }
@@ -83,7 +84,10 @@ public struct Event: Decodable, Equatable, Identifiable, Sendable {
     public let trigger: String
     public let createdUnix: Int
     public let durationSeconds: Int
+    /// The clip is sealed to the enrolled keys (ADR 0003); absent from controllers before it.
+    public let encrypted: Bool?
 
+    public var isEncrypted: Bool { encrypted ?? false }
     public var started: Date { Date(timeIntervalSince1970: TimeInterval(startedUnix)) }
     public var activitySeconds: Int { endedUnix - startedUnix }
 }
@@ -202,5 +206,40 @@ extension ControllerStatus {
         public let throttledSinceBoot: Bool
         /// good, warning or danger, computed by the controller.
         public let level: String
+    }
+}
+
+/// `GET /v1/encryption`: which public keys new recordings are sealed to.
+public struct EncryptionStatus: Decodable, Equatable, Sendable {
+    public struct Key: Decodable, Equatable, Sendable, Identifiable {
+        public let role: String  // "device" or "recovery"
+        public let label: String
+        public let publicKey: String
+        public let addedUnix: Int
+        public var id: String { publicKey }
+    }
+
+    public let enrolled: Bool
+    public let format: String
+    public let recipients: [Key]
+    public let unencryptedEvents: Int?
+
+    public var deviceKeys: [Key] { recipients.filter { $0.role == "device" } }
+}
+
+/// Body of `PUT /v1/encryption`.
+public struct Enrolment: Encodable, Equatable, Sendable {
+    public struct Key: Encodable, Equatable, Sendable {
+        public let role: String
+        public let label: String
+        public let publicKey: String
+    }
+
+    public let recipients: [Key]
+
+    /// One or more phones plus the single recovery key.
+    public init(devices: [(label: String, publicKey: String)], recoveryPublicKey: String) {
+        recipients = devices.map { Key(role: "device", label: $0.label, publicKey: $0.publicKey) }
+            + [Key(role: "recovery", label: "Recovery key", publicKey: recoveryPublicKey)]
     }
 }

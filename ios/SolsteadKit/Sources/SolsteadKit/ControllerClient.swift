@@ -101,8 +101,34 @@ public struct ControllerClient: Sendable {
 
     /// Downloads an event clip to a temporary file and returns its URL. AVPlayer cannot use the
     /// pinned session directly, so clips are fetched through it and played from disk.
-    public func downloadEventClip(_ event: Event) async throws -> URL {
-        try writeTemporary(try await request("v1/events/\(event.id)/clip"), name: event.id + ".mp4")
+    /// Sealed clips are decrypted on the phone with `identities` and only the plaintext copy is
+    /// returned; the sealed download is deleted.
+    public func downloadEventClip(_ event: Event, identities: [AgeIdentity] = []) async throws -> URL {
+        let data = try await request("v1/events/\(event.id)/clip")
+        guard event.isEncrypted || Age.isSealed(data.prefix(32)) else {
+            return try writeTemporary(data, name: event.id + ".mp4")
+        }
+        guard !identities.isEmpty else { throw SealingError.noMatchingKey }
+        let sealed = try writeTemporary(data, name: event.id + ".mp4.age")
+        defer { try? FileManager.default.removeItem(at: sealed) }
+        let plain = sealed.deletingPathExtension()
+        try Age.open(fileAt: sealed, to: plain, with: identities)
+        return plain
+    }
+
+    public func encryption() async throws -> EncryptionStatus {
+        try decode(EncryptionStatus.self, from: await request("v1/encryption"))
+    }
+
+    /// Replaces the keys new recordings are sealed to. Recordings already sealed are unchanged.
+    public func enroll(_ enrolment: Enrolment) async throws -> EncryptionStatus {
+        let body = try ControllerJSONEncoder.encoder.encode(enrolment)
+        return try decode(EncryptionStatus.self, from: await request("v1/encryption", method: "PUT", body: body))
+    }
+
+    /// Turns encryption off: new recordings are stored unencrypted; sealed ones stay sealed.
+    public func disableEncryption() async throws -> EncryptionStatus {
+        try decode(EncryptionStatus.self, from: await request("v1/encryption", method: "DELETE"))
     }
 
     private func writeTemporary(_ data: Data, name: String) throws -> URL {
