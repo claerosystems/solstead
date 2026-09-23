@@ -143,8 +143,11 @@ class Config:
             raise ConfigError(f"Configuration is not valid JSON: {error}") from None
         if not isinstance(data, dict):
             raise ConfigError("Configuration must be a JSON object")
-        data.setdefault("settings_path", str(path.with_name("timelapse.json")))
-        data.setdefault("recipients_path", str(path.with_name("recipients.json")))
+        # Provisioning writes these as null; either way they live beside config.json.
+        data["settings_path"] = data.get("settings_path") or str(path.with_name("timelapse.json"))
+        data["recipients_path"] = data.get("recipients_path") or str(
+            path.with_name("recipients.json")
+        )
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:

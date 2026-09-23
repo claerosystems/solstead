@@ -29,6 +29,9 @@ def test_provision_writes_private_config(tmp_path, storage_root):
         assert mode == 0o600, name
     written = json.loads((tmp_path / "etc" / "config.json").read_text())
     assert written["api_token"] == result["token"]
+    # Keys and time-lapse settings live beside config.json even though provisioning wrote null.
+    assert config.recipients_path == tmp_path / "etc" / "recipients.json"
+    assert config.settings_path == tmp_path / "etc" / "timelapse.json"
 
 
 @needs_openssl

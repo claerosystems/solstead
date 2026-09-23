@@ -44,7 +44,8 @@ def test_enrolment_needs_a_device_and_exactly_one_recovery_key():
 def test_enrolment_rejects_bad_keys_and_duplicates():
     _, payload = enrolment("device", "recovery")
     bad = json.loads(json.dumps(payload))
-    bad["recipients"][0]["public_key"] = bad["recipients"][0]["public_key"][:-1] + "x"
+    good = bad["recipients"][0]["public_key"]
+    bad["recipients"][0]["public_key"] = good[:-1] + ("x" if good[-1] != "x" else "y")
     with pytest.raises(RecipientsError, match="checksum|invalid"):
         parse(bad)
     dup = json.loads(json.dumps(payload))
