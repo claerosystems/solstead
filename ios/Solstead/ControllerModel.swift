@@ -89,14 +89,35 @@ final class ControllerModel: ObservableObject {
         }
     }
 
+    /// Plays a day's time-lapse. The controller assembles days of plain frames; a day with any
+    /// encrypted frame is downloaded frame by frame, decrypted and assembled on this phone.
     func playTimelapse(_ day: TimeLapseDay) async {
         await perform {
-            message = "Assembling and downloading the \(day.date) time-lapse…"
-            let url = try await connected().downloadTimelapseVideo(day: day.date)
+            let client = try connected()
+            let url: URL
+            if day.isEncrypted {
+                url = try await assembleTimelapseHere(day, with: client)
+            } else {
+                do {
+                    message = "Assembling and downloading the \(day.date) time-lapse…"
+                    url = try await client.downloadTimelapseVideo(day: day.date)
+                } catch let ControllerError.controller(_, status) where status == 409 {
+                    url = try await assembleTimelapseHere(day, with: client)  // encrypted since the list was fetched
+                }
+            }
             playingClip = try PlayableClip(
                 title: "Time-lapse \(day.date)", downloaded: url,
                 exportName: "Solstead time-lapse \(day.date)", recorded: timelapseStart(of: day))
             message = "Playing time-lapse for \(day.date)."
+        }
+    }
+
+    private func assembleTimelapseHere(_ day: TimeLapseDay, with client: ControllerClient) async throws -> URL {
+        message = "Downloading and decrypting the \(day.date) time-lapse…"
+        return try await client.assembleTimelapse(
+            day: day.date, fps: timelapse?.exportFps ?? 12, identities: [DeviceKeyStore.load()].compactMap { $0 }
+        ) { done, total in
+            await MainActor.run { self.message = "Decrypting the \(day.date) time-lapse: \(done) of \(total) frames…" }
         }
     }
 

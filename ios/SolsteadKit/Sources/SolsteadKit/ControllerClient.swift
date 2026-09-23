@@ -85,9 +85,65 @@ public struct ControllerClient: Sendable {
     }
 
     /// Downloads a day's time-lapse video (assembled by the controller) to a temporary file.
+    /// A day with sealed frames answers 409; see `assembleTimelapse` for those.
     public func downloadTimelapseVideo(day: String) async throws -> URL {
         let data = try await request("v1/timelapse/\(day)/video.mp4")
         return try writeTemporary(data, name: "timelapse-\(day).mp4")
+    }
+
+    /// A day's frames in time order, sealed ones marked.
+    public func timelapseFrames(day: String) async throws -> [TimeLapseFrame] {
+        try decode(TimeLapseFrameList.self, from: await request("v1/timelapse/\(day)")).frames
+    }
+
+    /// One frame as stored: a JPEG, or an age file when sealed.
+    public func timelapseFrame(_ frame: TimeLapseFrame) async throws -> Data {
+        try await request("v1/timelapse/\(frame.day)/\(frame.name)")
+    }
+
+    /// The age header of every sealed frame of a day, by frame name, for re-wrapping.
+    public func timelapseHeaders(day: String) async throws -> [String: Data] {
+        try JSONDecoder().decode(TimeLapseHeaders.self, from: await request("v1/timelapse/\(day)/headers")).headers
+    }
+
+    /// Replaces sealed frames' headers with re-wrapped ones; returns how many were replaced.
+    @discardableResult
+    public func replaceTimelapseHeaders(day: String, _ headers: [String: Data]) async throws -> Int {
+        let body = try JSONEncoder().encode(TimeLapseHeaders(headers: headers))
+        return try decode(TimeLapseHeadersReplaced.self,
+                          from: await request("v1/timelapse/\(day)/headers", method: "PUT", body: body)).replaced
+    }
+
+    /// What restoring access did to one day's sealed frames.
+    public struct RewrapCount: Equatable, Sendable {
+        public var unlocked = 0, already = 0, unreadable = 0
+        public init() {}
+    }
+
+    /// Adds `device` to every sealed frame of a day that `recovery` opens, re-wrapping only the
+    /// headers and uploading them in batches. Frames sealed under another key are counted, not changed.
+    public func rewrapTimelapseDay(_ day: String, using recovery: AgeIdentity, adding device: AgeIdentity,
+                                   batch: Int = 500) async throws -> RewrapCount {
+        var count = RewrapCount()
+        var pending: [String: Data] = [:]
+        for (name, header) in try await timelapseHeaders(day: day).sorted(by: { $0.key < $1.key }) {
+            if Age.canOpen(header: header, with: [device]) {
+                count.already += 1
+                continue
+            }
+            do {
+                pending[name] = try Age.rewrap(header: header, using: recovery, adding: device.recipient)
+            } catch SealingError.noMatchingKey {
+                count.unreadable += 1  // sealed under an earlier setup with a different recovery key
+                continue
+            }
+            if pending.count >= batch {
+                count.unlocked += try await replaceTimelapseHeaders(day: day, pending)
+                pending = [:]
+            }
+        }
+        if !pending.isEmpty { count.unlocked += try await replaceTimelapseHeaders(day: day, pending) }
+        return count
     }
 
     /// The controller's health log, newest first. `minimumLevel` is info, warning or error.
@@ -153,7 +209,7 @@ public struct ControllerClient: Sendable {
         try decode(EncryptionStatus.self, from: await request("v1/encryption", method: "DELETE"))
     }
 
-    private func writeTemporary(_ data: Data, name: String) throws -> URL {
+    func writeTemporary(_ data: Data, name: String) throws -> URL {
         let folder = Self.clipFolder
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(name)

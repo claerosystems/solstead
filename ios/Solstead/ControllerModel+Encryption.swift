@@ -80,10 +80,29 @@ extension ControllerModel {
                     continue  // overwritten while we were working
                 }
             }
+            // Time-lapse frames: one header download and a few batched uploads per day.
+            let days = try await client.timelapse().days?.filter(\.isEncrypted) ?? []
+            var frames = ControllerClient.RewrapCount()
+            for (index, day) in days.enumerated() {
+                message = "Unlocking older time-lapse days for this phone: \(index + 1) of \(days.count)…"
+                do {
+                    let count = try await client.rewrapTimelapseDay(day.date, using: recovery, adding: device)
+                    frames.unlocked += count.unlocked
+                    frames.already += count.already
+                    frames.unreadable += count.unreadable
+                } catch let ControllerError.controller(_, status) where status == 404 {
+                    continue  // the whole day was overwritten while we were working
+                }
+            }
             try await load(with: client)
-            var summary = "This phone can open recordings again. Unlocked \(unlocked) older recording\(unlocked == 1 ? "" : "s")"
-            if already > 0 { summary += "; \(already) already opened on this phone" }
-            if unreadable > 0 { summary += "; \(unreadable) belong to an earlier recovery key and stay locked" }
+            let opened = [(unlocked, "older recording"), (frames.unlocked, "time-lapse frame")]
+                .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+            var summary = "This phone can open recordings again. "
+                + (opened.isEmpty ? "Nothing older needed unlocking" : "Unlocked " + opened.joined(separator: " and "))
+            if already > 0 { summary += "; \(already) recording\(already == 1 ? " was" : "s were") already open on this phone" }
+            if unreadable + frames.unreadable > 0 {
+                summary += "; \(unreadable) recording\(unreadable == 1 ? "" : "s") and \(frames.unreadable) frame\(frames.unreadable == 1 ? "" : "s") belong to an earlier recovery key and stay locked"
+            }
             message = summary + "."
             finished = true
         }

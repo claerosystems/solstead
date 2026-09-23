@@ -21,7 +21,7 @@ from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
 from .sdnotify import notify
-from .sealing import SealingError
+from .sealing import SealingError, seal_file
 from .storage import Storage, StorageUnavailable, ram_folder
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
@@ -60,13 +60,14 @@ class Controller:
         self.store = EventStore(config.storage_path, config.events_allocation_bytes)
         self.recipients = RecipientStore(config.recipients_path)
         ram = config.buffer_path or ram_folder("solstead-buffer")
+        self.work_folder = ram / "work"  # plaintext clips being assembled for sealing
         self.buffer = buffer or SegmentBuffer(
             config.camera_url, ram / "segments", config.segment_seconds, config.buffer_seconds,
         )  # fmt: skip
         self.recorder = recorder or EventRecorder(
             self.buffer, self.store, config.event_pre_seconds, config.event_post_seconds,
             config.event_hold_seconds, config.event_max_seconds,
-            work_folder=ram / "work", recipients=self.recipients.keys,
+            work_folder=self.work_folder, recipients=self.recipients.keys,
         )  # fmt: skip
         if watcher is None and config.events_enabled:
             client = PullPointClient(
@@ -84,8 +85,9 @@ class Controller:
             load_settings(config.settings_path) if config.settings_path else TimeLapseSettings()
         )
         self.timelapse = timelapse or TimeLapse(
-            config.storage_path, settings, self.frame_for_timelapse
-        )
+            config.storage_path, settings, self.frame_for_timelapse,
+            recipients=self.recipients.keys,
+        )  # fmt: skip
         self.health = HealthLog(config.storage_path / HEALTH_FILE, guard=self._storage_ok)
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
@@ -109,6 +111,8 @@ class Controller:
             "sealing_error": None,
             "clock_warned": False,
         }
+        # Frames and manual clips from before enrolment still to seal; cleared when none are left.
+        self._backlog = True
 
     def _storage_ok(self) -> bool:
         try:
@@ -164,6 +168,8 @@ class Controller:
                     self.timelapse.tick()
                 except StorageUnavailable as error:
                     self.timelapse.last_error = str(error)
+            if self._backlog and self._storage_ok():
+                self._seal_older_frames_and_clips()
             self._stop.wait(TICK_SECONDS)
 
     def _check_storage(self) -> None:
@@ -253,6 +259,27 @@ class Controller:
             return
         if event:
             log.info("Encrypted earlier clip %s", event.id)
+
+    def _seal_older_frames_and_clips(self) -> None:
+        """Seal time-lapse frames and manual clips recorded before keys were enrolled."""
+        if not self.recipients.enrolled or self._seen["sealing_error"]:
+            return
+        keys = self.recipients.keys()
+        try:
+            frames = self.timelapse.seal_plain(keys)
+            clip = None if frames else self.storage.seal_next_plain_clip(keys)
+        except (OSError, SealingError) as error:
+            self._seen["sealing_error"] = str(error)
+            self.health.record(
+                "error",
+                "encryption",
+                f"Could not encrypt older time-lapse or test footage: {error}",
+            )
+            return
+        if frames or clip:
+            log.info("Encrypted %s earlier time-lapse frames, clip %s", frames, clip)
+        else:
+            self._backlog = False
 
     def _poll_incidents(self) -> None:
         """Turn counters and error fields from the workers into health-log entries."""
@@ -362,20 +389,29 @@ class Controller:
         return image
 
     def record(self) -> dict:
-        partial, final = self.storage.reserve_clip()
+        """A manual test clip. With keys enrolled it is assembled in RAM and only sealed on disk."""
+        keys = self.recipients.keys()
+        partial, final = self.storage.reserve_clip(sealed=bool(keys))
+        plain = partial
+        if keys:
+            self.work_folder.mkdir(parents=True, exist_ok=True)
+            plain = self.work_folder / ("manual-" + final.name.split(".")[0] + ".mp4.partial")
         try:
             recent = self._buffered(self.config.clip_seconds)
             if recent:
                 try:
-                    assemble(recent, partial, runner=self.camera.runner)
+                    assemble(recent, plain, runner=self.camera.runner)
                 except ClipError as error:
                     raise CameraError(str(error)) from None
             else:
-                self.camera.record(partial, self.config.clip_seconds)
+                self.camera.record(plain, self.config.clip_seconds)
             self.last_camera_ok = int(time.time())
+            if keys:
+                seal_file(plain, partial, keys)
             return self.storage.commit_clip(partial, final)
         finally:
             partial.unlink(missing_ok=True)
+            plain.unlink(missing_ok=True)
 
     def recordings(self) -> list[dict]:
         return self.storage.clips()
@@ -447,6 +483,15 @@ class Controller:
         event = self.store.replace_header(event_id, header)
         return event.to_dict() if event else None
 
+    def timelapse_headers(self, day: str) -> list[tuple[str, bytes]]:
+        self.storage.check()
+        return self.timelapse.headers(day)
+
+    def replace_timelapse_headers(self, day: str, headers: dict[str, bytes]) -> int:
+        """A key holder added a recipient to a day's older frames (restoring access)."""
+        self.storage.check()
+        return self.timelapse.replace_headers(day, headers)
+
     def encryption_status(self) -> dict:
         status = self.recipients.status()
         try:
@@ -454,6 +499,11 @@ class Controller:
             status["unencrypted_events"] = sum(not e.encrypted for e in events)
         except OSError:
             status["unencrypted_events"] = None
+        try:
+            days = self.timelapse.days()
+            status["unencrypted_frames"] = sum(d["frames"] - d["encrypted_frames"] for d in days)
+        except OSError:
+            status["unencrypted_frames"] = None
         return status
 
     def enroll(self, payload: object) -> dict:
@@ -461,6 +511,8 @@ class Controller:
         recipients = parse_recipients(payload)
         self.recipients.replace(recipients)
         self._seen["sealing_error"] = None
+        self._backlog = True
+        self.timelapse.clear_exports()
         self.health.record(
             "info", "encryption", "Recording keys enrolled",
             devices=sum(r.role == "device" for r in recipients),

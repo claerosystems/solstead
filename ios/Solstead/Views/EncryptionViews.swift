@@ -24,6 +24,9 @@ struct EncryptionSection: View {
                 if let waiting = encryption.unencryptedEvents, waiting > 0 {
                     LabeledContent("Older clips to encrypt", value: "\(waiting)")
                 }
+                if let waiting = encryption.unencryptedFrames, waiting > 0 {
+                    LabeledContent("Older time-lapse frames to encrypt", value: "\(waiting)")
+                }
                 Button(model.thisPhoneEnrolled ? "Unlock older recordings with recovery key" : "Restore access with recovery key",
                        systemImage: "key") { model.showRestore = true }
             }

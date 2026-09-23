@@ -175,6 +175,10 @@ struct TimeLapseSection: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        if day.isEncrypted {
+                            Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                                .accessibilityLabel("Encrypted")
+                        }
                         Image(systemName: "play.circle")
                     }
                 }
@@ -183,7 +187,7 @@ struct TimeLapseSection: View {
         } header: {
             Text("Time-lapse videos")
         } footer: {
-            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second. Adjust the schedule in Settings.")
+            Text("Tap a day to watch it as a video at \(lapse.exportFps) frames per second. Encrypted days are decrypted and put together on this phone. Adjust the schedule in Settings.")
         }
     }
 }
@@ -644,10 +648,17 @@ struct RecordingsSection: View {
                 Text("No recordings yet").foregroundStyle(.secondary)
             }
             ForEach(model.recordings) { clip in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(clip.created, format: .dateTime.weekday(.wide).month().day().hour().minute())
-                    Text(ByteCountFormatter.string(fromByteCount: clip.sizeBytes, countStyle: .file))
-                        .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(clip.created, format: .dateTime.weekday(.wide).month().day().hour().minute())
+                        Text(ByteCountFormatter.string(fromByteCount: clip.sizeBytes, countStyle: .file))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if clip.isEncrypted {
+                        Spacer()
+                        Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                            .accessibilityLabel("Encrypted")
+                    }
                 }
             }
         }

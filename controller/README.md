@@ -19,7 +19,7 @@ The service that runs on the Raspberry Pi inside the controller. The standard li
 | `solstead/sealing.py` | Seals files to public keys in the age v1 format (X25519, ChaCha20-Poly1305). |
 | `solstead/recipients.py` | The enrolled public keys (device and recovery) that recordings are sealed to. |
 | `solstead/live.py` | On-demand live view: ffmpeg copies a camera stream into 1-second HLS segments in RAM. |
-| `solstead/timelapse.py` | Scheduled frames in their own allocation, day listing, MP4 export, owner-adjustable settings. |
+| `solstead/timelapse.py` | Scheduled frames in their own allocation (sealed per frame when keys are enrolled), day listing, MP4 export of plain days, owner-adjustable settings. |
 | `solstead/health.py` | Health log: incidents in memory and in `<storage>/health.jsonl`, capped. |
 | `solstead/sdnotify.py` | systemd readiness and watchdog pings without a dependency. |
 | `solstead/thermal.py` | CPU temperature against the Pi 4's throttle points and its under-voltage/throttle flags. |
@@ -99,6 +99,12 @@ assembles that day's frames with libx264 at `export_fps` and caches the result f
 `PUT /v1/timelapse` and persist in `timelapse.json` next to `config.json`; the status reports an
 estimated retention in days from the current schedule and average frame size.
 
+With encryption keys enrolled, each frame is sealed in memory as it is captured and stored as
+`HHMMSS.jpg.age`, one age file per frame. The controller cannot open those, so
+`GET /v1/timelapse/{date}/video.mp4` answers 409 for any day with a sealed frame and the app
+downloads the frames, decrypts them and assembles the video on the phone. Days of plain frames
+are still exported here.
+
 ## Encryption at rest
 
 See [ADR 0003](../docs/adr/0003-seal-recordings-to-owner-held-keys.md). The owner's phone enrols
@@ -115,7 +121,13 @@ header back (`/v1/events/{id}/header`). Only headers travel; the controller stil
 private key. Encryption is the owner's choice (a switch in the app's Settings). `DELETE /v1/encryption` turns it
 off; clips already sealed stay sealed, since the controller cannot decrypt them. Until keys are
 enrolled, event clips are stored unencrypted as before and `GET /v1/status` reports
-`encryption.enrolled: false`. Manual test clips and time-lapse frames are not sealed yet.
+`encryption.enrolled: false`.
+
+Time-lapse frames (see Time-lapse) and manual test clips (`manual/<id>.mp4.age`, assembled in RAM
+like event clips) are sealed the same way once keys are enrolled, and those stored before
+enrolment are sealed in the background; enrolment also deletes cached plaintext time-lapse
+exports. Restoring access re-wraps frame headers a day at a time
+(`/v1/timelapse/{date}/headers`).
 
 Any age implementation opens a sealed clip. For bench checks without the app:
 
@@ -200,21 +212,23 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | --- | --- |
 | `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, an `events` block (running, buffer age, motion active, camera subscription, counts, allocation), a `live` block (available, active, quality, ready), and a `timelapse` block (settings and counts). |
 | `GET /v1/camera/snapshot[?width=N]` | One JPEG frame (`image/jpeg`) at `snapshot_width` by default; `width=0` returns the camera's full resolution, taken from the buffer. |
-| `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix}, …]}`, newest first, up to 200. |
-| `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD; returns its entry with status 201. |
+| `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix, encrypted}, …]}`, newest first, up to 200. |
+| `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD (sealed as `<id>.mp4.age` when keys are enrolled); returns its entry with status 201. |
 | `GET /v1/events[?limit=N]` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
 | `DELETE /v1/events/{id}` | The owner deletes an event: clip and record are removed and the deletion is logged. 404 if unknown. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |
 | `GET /v1/events/{id}/header` | Just the age header of a sealed clip (a few hundred bytes), for a key holder to re-wrap. 404 for unencrypted clips. |
 | `PUT /v1/events/{id}/header` | Replace a sealed clip's header with a re-wrapped one (raw bytes). Refused unless the body is exactly one age header that keeps every existing stanza; the payload is never touched. Returns the updated event. |
-| `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events}`. Also in the status as `encryption`. |
+| `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events, unencrypted_frames}`. Also in the status as `encryption`. |
 | `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
 | `DELETE /v1/encryption` | Turn encryption off: forget the enrolled keys so new recordings are stored unencrypted. Clips already sealed stay sealed. |
-| `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames. |
+| `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames (`date`, `frames`, `bytes`, `encrypted_frames`). |
 | `PUT /v1/timelapse` | Change `enabled`, `interval_seconds`, `window` (and `width`, `allocation_bytes`, `export_fps`); JSON body. |
-| `GET /v1/timelapse/{date}` | That day's frames (`name`, `unix`, `size_bytes`). |
-| `GET /v1/timelapse/{date}/{HHMMSS}.jpg` | One frame. |
-| `GET /v1/timelapse/{date}/video.mp4` | That day's frames assembled into an H.264 video. |
+| `GET /v1/timelapse/{date}` | That day's frames (`day`, `name`, `unix`, `size_bytes`, `encrypted`). |
+| `GET /v1/timelapse/{date}/{HHMMSS}.jpg[.age]` | One frame: a JPEG, or for `.age` the sealed file (`application/octet-stream`) for the phone to decrypt. |
+| `GET /v1/timelapse/{date}/video.mp4` | That day's frames assembled into an H.264 video. 409 with `{"encrypted": true}` if any frame is sealed; the phone assembles those. |
+| `GET /v1/timelapse/{date}/headers` | `{"date", "headers": {name: base64 age header}}` for the day's sealed frames, for a key holder to re-wrap. |
+| `PUT /v1/timelapse/{date}/headers` | Replace sealed frames' headers: `{"headers": {name: base64}}`, up to 4 MiB. Each must keep every existing stanza; frames pruned meanwhile are skipped. Returns `{"date", "replaced"}`. |
 | `POST /v1/live?quality=low` | Start or keep live view (`low` or `high`); returns when playable, with the playlist path. |
 | `GET /v1/live/index.m3u8`, `GET /v1/live/{segment}` | The HLS playlist, `init.mp4` and `seg_NNNNN.m4s` segments. Each fetch keeps the stream alive. |
 | `DELETE /v1/live` | Stop live view now. |

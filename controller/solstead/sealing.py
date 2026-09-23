@@ -273,6 +273,38 @@ def read_header(source: BinaryIO) -> tuple[bytes, list[bytes]]:
             raise SealingError("Header is too long")
 
 
+def replace_file_header(path: Path, new_header: bytes) -> int:
+    """Swap a sealed file's header for a re-wrapped one that keeps every existing stanza.
+
+    The controller cannot check the header MAC (it has no key), but it can refuse anything
+    that would drop a recipient or touch the payload. Returns the new file size.
+    """
+    from io import BytesIO
+
+    if len(new_header) > MAX_HEADER:
+        raise SealingError("Header is too long")
+    parsed, stanzas = read_header(BytesIO(new_header))
+    if parsed != new_header:
+        raise SealingError("Body must be exactly one age header")
+    partial = path.with_name(path.name + ".partial")
+    with path.open("rb") as old:
+        _, old_stanzas = read_header(old)
+        if any(s not in stanzas for s in old_stanzas):
+            raise SealingError("The new header must keep every existing key")
+        try:
+            with partial.open("wb") as new:
+                new.write(new_header)
+                while chunk := old.read(1024 * 1024):
+                    new.write(chunk)
+                new.flush()
+                os.fsync(new.fileno())
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+    partial.rename(path)
+    return path.stat().st_size
+
+
 def open_stream(source: BinaryIO, target: BinaryIO, identity: bytes) -> None:
     head = _read_line(source) + b"\n"
     if head != INTRO:

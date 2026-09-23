@@ -99,6 +99,10 @@ public struct Recording: Decodable, Equatable, Identifiable, Sendable {
     public let id: String
     public let sizeBytes: Int64
     public let createdUnix: Int
+    /// Sealed to the enrolled keys (`<id>.mp4.age`); absent from older controllers.
+    public let encrypted: Bool?
+
+    public var isEncrypted: Bool { encrypted ?? false }
 
     public var created: Date { Date(timeIntervalSince1970: TimeInterval(createdUnix)) }
 }
@@ -141,8 +145,28 @@ public struct TimeLapseDay: Decodable, Equatable, Identifiable, Sendable {
     public let date: String
     public let frames: Int
     public let bytes: Int64
+    /// Frames sealed to the enrolled keys; absent from older controllers.
+    public let encryptedFrames: Int?
     public var id: String { date }
+
+    /// The controller cannot assemble a day with any sealed frame; the phone does.
+    public var isEncrypted: Bool { (encryptedFrames ?? 0) > 0 }
 }
+
+/// One stored time-lapse frame: `HHMMSS.jpg`, or `HHMMSS.jpg.age` when sealed.
+public struct TimeLapseFrame: Decodable, Equatable, Sendable {
+    public let day: String
+    public let name: String
+    public let unix: Int
+    public let sizeBytes: Int64
+    public let encrypted: Bool?
+
+    public var isEncrypted: Bool { encrypted ?? name.hasSuffix(".age") }
+}
+
+struct TimeLapseFrameList: Decodable { let date: String; let frames: [TimeLapseFrame] }
+struct TimeLapseHeaders: Codable { let headers: [String: Data] }
+struct TimeLapseHeadersReplaced: Decodable { let replaced: Int }
 
 /// Fields the owner may change; nil leaves a setting as it is.
 public struct TimeLapseSettingsUpdate: Encodable, Equatable, Sendable {
@@ -223,6 +247,7 @@ public struct EncryptionStatus: Decodable, Equatable, Sendable {
     public let format: String
     public let recipients: [Key]
     public let unencryptedEvents: Int?
+    public let unencryptedFrames: Int?
 
     public var deviceKeys: [Key] { recipients.filter { $0.role == "device" } }
 }

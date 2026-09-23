@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 import uuid
@@ -14,8 +13,8 @@ from pathlib import Path
 
 from .buffer import SegmentBuffer
 from .clips import ClipError, assemble
-from .sealing import MAX_HEADER, SealingError, read_header, seal_file
 from .sealing import SUFFIX as SEALED_SUFFIX
+from .sealing import read_header, replace_file_header, seal_file
 
 EVENTS_FOLDER = "events"
 
@@ -113,41 +112,13 @@ class EventStore:
             return read_header(file)[0]
 
     def replace_header(self, event_id: str, new_header: bytes) -> Event | None:
-        """Swap a sealed clip's header for a re-wrapped one that keeps every existing stanza.
-
-        The controller cannot check the header MAC (it has no key), but it can refuse anything
-        that would drop a recipient or touch the payload.
-        """
-        from io import BytesIO
-
+        """Swap a sealed clip's header for a re-wrapped one (sealing.replace_file_header)."""
         with self._lock:
             event = self.load(event_id)
             if event is None or not event.encrypted or not self.clip_path(event).is_file():
                 return None
-            if len(new_header) > MAX_HEADER:
-                raise SealingError("Header is too long")
-            parsed, stanzas = read_header(BytesIO(new_header))
-            if parsed != new_header:
-                raise SealingError("Body must be exactly one age header")
-            path = self.clip_path(event)
-            partial = path.with_name(path.name + ".partial")
-            with path.open("rb") as old:
-                _, old_stanzas = read_header(old)
-                missing = [s for s in old_stanzas if s not in stanzas]
-                if missing:
-                    raise SealingError("The new header must keep every existing key")
-                try:
-                    with partial.open("wb") as new:
-                        new.write(new_header)
-                        while chunk := old.read(1024 * 1024):
-                            new.write(chunk)
-                        new.flush()
-                        os.fsync(new.fileno())
-                except BaseException:
-                    partial.unlink(missing_ok=True)
-                    raise
-            partial.rename(path)
-            updated = replace(event, size_bytes=path.stat().st_size)
+            size = replace_file_header(self.clip_path(event), new_header)
+            updated = replace(event, size_bytes=size)
             (self.folder / (event.id + ".json")).write_text(json.dumps(asdict(updated)))
             return updated
 

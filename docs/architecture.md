@@ -71,6 +71,7 @@ In the order the product notes prioritise validation:
 3. Cellular remote access without vendor servers, after the carrier and modem validation in
    [cellular-validation-plan.md](cellular-validation-plan.md).
 4. SMS alerts, reduced-power mode and power telemetry once the power path is measured.
-5. Encrypted local storage: controller side done (ADR 0003); next the app generates the device
-   and recovery keys, enrols them, and decrypts clips; then time-lapse frames. Customer-controlled
-   off-site backup uploads the same sealed files (ADR 0002).
+5. Encrypted local storage is built (ADR 0003): event clips, time-lapse frames and manual clips
+   are sealed to owner-held keys, and the phone decrypts clips and assembles encrypted
+   time-lapse days. Next, customer-controlled off-site backup uploads the same sealed files
+   (ADR 0002).

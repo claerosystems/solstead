@@ -1,4 +1,10 @@
-"""Time-lapse: one frame every few minutes during a daily window, in its own allocation."""
+"""Time-lapse: one frame every few minutes during a daily window, in its own allocation.
+
+With recording keys enrolled (ADR 0003) each frame is sealed in memory as it is captured and
+written as HHMMSS.jpg.age, one age file per frame, so plaintext never reaches the SSD. The
+controller cannot open those, so a day with any sealed frame is assembled into a video on the
+phone; days of plain frames are still exported here with ffmpeg.
+"""
 
 from __future__ import annotations
 
@@ -6,16 +12,20 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .sealing import SUFFIX as SEALED_SUFFIX
+from .sealing import read_header, replace_file_header, seal_bytes, seal_file
+
 TIMELAPSE_FOLDER = "timelapse"
 EXPORT_FOLDER = "timelapse-exports"
 DAY_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-FRAME_NAME = re.compile(r"^\d{6}\.jpg$")
+FRAME_NAME = re.compile(r"^\d{6}\.jpg(\.age)?$")  # .age: sealed to the enrolled keys
 WINDOW = re.compile(r"^(\d{2}):(\d{2})-(\d{2}):(\d{2})$")
 EXPORT_MAX_AGE = 24 * 3600
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -23,6 +33,10 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 class TimeLapseError(Exception):
     pass
+
+
+class TimeLapseSealed(TimeLapseError):
+    """The day has sealed frames, which only the owner's phone can assemble."""
 
 
 @dataclass(frozen=True)
@@ -85,6 +99,7 @@ class Frame:
     name: str
     unix: int
     size_bytes: int
+    encrypted: bool = False
 
 
 class TimeLapse:
@@ -97,6 +112,7 @@ class TimeLapse:
         capture: Callable[[int], bytes],
         runner: Runner = subprocess.run,
         clock: Callable[[], float] = time.time,
+        recipients: Callable[[], list[bytes]] = list,
     ):
         self.root = Path(root)
         self.folder = self.root / TIMELAPSE_FOLDER
@@ -105,6 +121,9 @@ class TimeLapse:
         self.capture = capture
         self.runner = runner
         self.clock = clock
+        self.recipients = recipients
+        # The API thread (header replacement) against the loop (capture, pruning, sealing).
+        self._lock = threading.Lock()
         self.last_capture: float | None = None
         self.last_error: str | None = None
 
@@ -135,9 +154,12 @@ class TimeLapse:
 
     def capture_frame(self, now: float) -> Frame:
         data = self.capture(self.settings.width)
+        keys = self.recipients()
         local = datetime.fromtimestamp(now)
         day = local.strftime("%Y-%m-%d")
         name = local.strftime("%H%M%S") + ".jpg"
+        if keys:
+            data, name = seal_bytes(data, keys), name + SEALED_SUFFIX
         folder = self.folder / day
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / name
@@ -149,7 +171,7 @@ class TimeLapse:
         partial.rename(path)
         self.last_capture = now
         self.prune()
-        return Frame(day, name, int(now), len(data))
+        return Frame(day, name, int(now), len(data), bool(keys))
 
     # ---- listing -------------------------------------------------------------------------
 
@@ -166,6 +188,7 @@ class TimeLapse:
                             "date": entry.name,
                             "frames": len(frames),
                             "bytes": sum(p.stat().st_size for p in frames),
+                            "encrypted_frames": sum(p.name.endswith(SEALED_SUFFIX) for p in frames),
                         }
                     )
         return result
@@ -177,8 +200,9 @@ class TimeLapse:
         found = []
         for path in sorted(folder.iterdir()):
             if FRAME_NAME.match(path.name):
-                stamp = datetime.strptime(day + path.stem, "%Y-%m-%d%H%M%S")
-                found.append(Frame(day, path.name, int(stamp.timestamp()), path.stat().st_size))
+                stamp = datetime.strptime(day + path.name[:6], "%Y-%m-%d%H%M%S")
+                found.append(Frame(day, path.name, int(stamp.timestamp()), path.stat().st_size,
+                                   path.name.endswith(SEALED_SUFFIX)))  # fmt: skip
         return found
 
     def frame_path(self, day: str, name: str) -> Path | None:
@@ -207,6 +231,10 @@ class TimeLapse:
 
     def prune(self) -> int:
         """Delete oldest frames until the allocation fits. Returns how many were deleted."""
+        with self._lock:
+            return self._prune()
+
+    def _prune(self) -> int:
         frames = self.all_frames()
         used = sum(p.stat().st_size for p in frames)
         deleted = 0
@@ -220,6 +248,12 @@ class TimeLapse:
                 path.parent.rmdir()
         self.prune_exports()
         return deleted
+
+    def clear_exports(self) -> None:
+        """Keys were enrolled: cached videos are plaintext, so they go."""
+        if self.exports.is_dir():
+            for path in self.exports.iterdir():
+                path.unlink(missing_ok=True)
 
     def prune_exports(self) -> None:
         if not self.exports.is_dir():
@@ -253,6 +287,58 @@ class TimeLapse:
             "last_error": self.last_error,
         }
 
+    # ---- sealing -------------------------------------------------------------------------
+
+    def seal_plain(self, recipients: list[bytes], limit: int = 50) -> int:
+        """Seal up to `limit` frames captured before keys were enrolled, oldest first.
+
+        Returns how many were sealed; 0 means none are left. As with event clips, the SSD may
+        keep the old plaintext blocks.
+        """
+        with self._lock:
+            sealed = 0
+            for path in self.all_frames():
+                if sealed >= limit:
+                    break
+                if path.name.endswith(SEALED_SUFFIX):
+                    continue
+                target = path.with_name(path.name + SEALED_SUFFIX)
+                if not target.is_file():  # else a crash came between rename and unlink
+                    partial = target.with_name(target.name + ".partial")
+                    seal_file(path, partial, recipients)
+                    partial.rename(target)
+                path.unlink()
+                sealed += 1
+            return sealed
+
+    def headers(self, day: str) -> list[tuple[str, bytes]]:
+        """Each sealed frame's age header, for a key holder to re-wrap (restoring access)."""
+        result = []
+        for frame in self.frames(day):
+            if frame.encrypted:
+                with (self.folder / day / frame.name).open("rb") as file:
+                    result.append((frame.name, read_header(file)[0]))
+        return result
+
+    def replace_headers(self, day: str, headers: dict[str, bytes]) -> int:
+        """Swap sealed frames' headers for re-wrapped ones; each must keep every existing key.
+
+        Frames pruned meanwhile are skipped. Returns how many were replaced.
+        """
+        if not DAY_NAME.match(day):
+            raise TimeLapseError("Not a day")
+        bad = [name for name in headers if not FRAME_NAME.match(name)]
+        if bad:
+            raise TimeLapseError(f"Not a frame name: {bad[0]}")
+        replaced = 0
+        with self._lock:
+            for name, header in headers.items():
+                path = self.folder / day / name
+                if name.endswith(SEALED_SUFFIX) and path.is_file():
+                    replace_file_header(path, header)
+                    replaced += 1
+        return replaced
+
     # ---- export --------------------------------------------------------------------------
 
     def export_video(self, day: str) -> Path:
@@ -260,6 +346,8 @@ class TimeLapse:
         frames = self.frames(day)
         if not frames:
             raise TimeLapseError("No frames for that day")
+        if any(f.encrypted for f in frames):
+            raise TimeLapseSealed("This day is encrypted; the app assembles it on the phone")
         self.exports.mkdir(parents=True, exist_ok=True)
         output = self.exports / f"{day}-{frames[-1].name[:-4]}-{self.settings.export_fps}fps.mp4"
         if output.is_file():

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hmac
 import json
 import re
@@ -14,7 +16,7 @@ from . import __version__
 from .controller import Unavailable
 from .recipients import RecipientsError
 from .sealing import MAX_HEADER, SealingError
-from .timelapse import TimeLapseError
+from .timelapse import TimeLapseError, TimeLapseSealed
 
 JSON = "application/json"
 SEALED = "application/octet-stream"  # an age-encryption.org/v1 file the phone decrypts
@@ -24,7 +26,9 @@ EVENT = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)$")
 EVENT_HEADER = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/header$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
 TIMELAPSE_DAY = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})$")
-TIMELAPSE_FRAME = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/(\d{6}\.jpg)$")
+TIMELAPSE_FRAME = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/(\d{6}\.jpg(?:\.age)?)$")
+TIMELAPSE_HEADERS = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/headers$")
+HEADERS_BODY_MAX = 4 * 1024 * 1024  # a batch of re-wrapped frame headers
 TIMELAPSE_VIDEO = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/video\.mp4$")
 LIVE_TYPES = {
     ".m3u8": "application/vnd.apple.mpegurl",
@@ -94,9 +98,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
-    def read_json(self) -> dict:
+    def read_json(self, limit: int = 64 * 1024) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > 64 * 1024:
+        if length <= 0 or length > limit:
             raise TimeLapseError("A JSON body is required")
         try:
             data = json.loads(self.rfile.read(length))
@@ -172,12 +176,31 @@ class Handler(BaseHTTPRequestHandler):
                 found = controller.timelapse.frame_path(frame.group(1), frame.group(2))
                 if not found:
                     return self.reply(404, {"error": "Frame not found"})
-                return self.send_file(found, "image/jpeg")
+                return self.send_file(found, SEALED if found.suffix == ".age" else "image/jpeg")
             video = TIMELAPSE_VIDEO.match(path)
             if get and video:
-                return self.send_file(
-                    controller.timelapse.export_video(video.group(1)), "video/mp4"
-                )
+                try:
+                    exported = controller.timelapse.export_video(video.group(1))
+                except TimeLapseSealed as error:
+                    return self.reply(409, {"error": str(error), "encrypted": True})
+                return self.send_file(exported, "video/mp4")
+            headers = TIMELAPSE_HEADERS.match(path)
+            if headers and get:
+                found = controller.timelapse_headers(headers.group(1))
+                encoded = {name: base64.b64encode(h).decode() for name, h in found}
+                return self.reply(200, {"date": headers.group(1), "headers": encoded})
+            if headers and self.command == "PUT":
+                supplied = self.read_json(HEADERS_BODY_MAX).get("headers")
+                if not isinstance(supplied, dict) or not all(
+                    isinstance(v, str) for v in supplied.values()
+                ):
+                    raise TimeLapseError("headers must map frame names to base64 age headers")
+                try:
+                    decoded = {k: base64.b64decode(v, validate=True) for k, v in supplied.items()}
+                except binascii.Error:
+                    raise TimeLapseError("headers must be base64") from None
+                count = controller.replace_timelapse_headers(headers.group(1), decoded)
+                return self.reply(200, {"date": headers.group(1), "replaced": count})
             if self.command == "POST" and path == "/v1/live":
                 quality = query.get("quality", "low")
                 if quality not in ("low", "high"):
