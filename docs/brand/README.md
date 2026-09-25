@@ -6,9 +6,13 @@ The Solstead mark is a roof line over a half sun on the horizon: a home under th
 
 | Name | Hex | Use |
 | --- | --- | --- |
-| Night | `#16222E` | App icon background, wordmark on light backgrounds |
-| Ivory | `#F4EEE2` | Roof and horizon lines on the default icon; mark on dark backgrounds |
-| Sun | `#F2A33A` | The sun, only. Too light for text on light backgrounds. |
+| Sky | `#2A78C2` | App icon background, app accent colour (`#7DB8EE` in dark mode) |
+| Deep | `#123A63` | Mark lines and wordmark on light backgrounds |
+| Cloud | `#FFFFFF` | Roof and horizon lines on the icon; mark on Sky or dark backgrounds |
+| Sun | `#FFD84A` | The sun, only. Too light for text or thin lines on light backgrounds. |
+
+The palette deliberately avoids a near-black ground with an orange sun, which reads as
+Vosker's black-and-orange branding.
 
 ## Files
 
@@ -28,7 +32,7 @@ three PNGs as well. The default PNG must be opaque (no alpha channel) for App St
 
 ## Layered icon (Liquid Glass)
 
-`ios/Solstead/AppIcon.icon` is an Icon Composer document: a Night fill (system dark backdrop
+`ios/Solstead/AppIcon.icon` is an Icon Composer document: a Sky fill (system dark backdrop
 in dark mode) with three layers, roof and horizon in one glass group with slight translucency
 and the sun in its own group without it, so its colour stays true. Xcode 26 compiles it for
 iOS 26 and later; the flat `AppIcon.appiconset` PNGs remain the fallback for earlier systems.
