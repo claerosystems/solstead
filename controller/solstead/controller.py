@@ -21,7 +21,7 @@ from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
 from .sdnotify import notify
-from .sealing import SealingError, seal_file
+from .sealed import SealedRecordings
 from .storage import Storage, StorageUnavailable, ram_folder
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
@@ -57,17 +57,17 @@ class Controller:
             config.storage_path, config.storage_require_mount, config.min_free_bytes
         )
         self.camera = camera or Camera(config.camera_url, config.snapshot_width)
-        self.store = EventStore(config.storage_path, config.events_allocation_bytes)
         self.recipients = RecipientStore(config.recipients_path)
         ram = config.buffer_path or ram_folder("solstead-buffer")
-        self.work_folder = ram / "work"  # plaintext clips being assembled for sealing
+        # Every recording file goes through here; plaintext for sealing is staged in ram/work.
+        self.sealed = SealedRecordings(self.recipients.keys, ram / "work")
+        self.store = EventStore(config.storage_path, config.events_allocation_bytes, self.sealed)
         self.buffer = buffer or SegmentBuffer(
             config.camera_url, ram / "segments", config.segment_seconds, config.buffer_seconds,
         )  # fmt: skip
         self.recorder = recorder or EventRecorder(
             self.buffer, self.store, config.event_pre_seconds, config.event_post_seconds,
             config.event_hold_seconds, config.event_max_seconds,
-            work_folder=self.work_folder, recipients=self.recipients.keys,
         )  # fmt: skip
         if watcher is None and config.events_enabled:
             client = PullPointClient(
@@ -85,9 +85,12 @@ class Controller:
             load_settings(config.settings_path) if config.settings_path else TimeLapseSettings()
         )
         self.timelapse = timelapse or TimeLapse(
-            config.storage_path, settings, self.frame_for_timelapse,
-            recipients=self.recipients.keys,
+            config.storage_path, settings, self.frame_for_timelapse, sealed=self.sealed,
         )  # fmt: skip
+        # Older plain footage is sealed events first; a lambda so a replaced timelapse counts.
+        self.sealed.add_source(self.store.plain_clips)
+        self.sealed.add_source(lambda: self.timelapse.plain_frames())
+        self.sealed.add_source(self.storage.plain_clips)
         self.health = HealthLog(config.storage_path / HEALTH_FILE, guard=self._storage_ok)
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
@@ -108,11 +111,9 @@ class Controller:
             "watcher_error": None,
             "timelapse_error": None,
             "recorder_error": None,
-            "sealing_error": None,
+            "sealing_error": None,  # the sealed recordings module's last_error
             "clock_warned": False,
         }
-        # Frames and manual clips from before enrolment still to seal; cleared when none are left.
-        self._backlog = True
 
     def _storage_ok(self) -> bool:
         try:
@@ -161,15 +162,14 @@ class Controller:
                         )  # fmt: skip
                 except OSError as error:
                     self.recorder.last_error = f"Storage error: {type(error).__name__}"
-                self._seal_backlog()
             if self.camera.configured:
                 try:
                     self.storage.check()
                     self.timelapse.tick()
                 except StorageUnavailable as error:
                     self.timelapse.last_error = str(error)
-            if self._backlog and self._storage_ok():
-                self._seal_older_frames_and_clips()
+            if self.sealed.pending and self._storage_ok():
+                self.sealed.seal_older()
             self._stop.wait(TICK_SECONDS)
 
     def _check_storage(self) -> None:
@@ -247,40 +247,6 @@ class Controller:
         self.events_reason = None
         self.health.record("info", "events", "Event recording started")
 
-    def _seal_backlog(self) -> None:
-        """Seal one clip recorded before keys were enrolled, a tick at a time."""
-        if not self.recipients.enrolled or self._seen["sealing_error"]:
-            return
-        try:
-            event = self.store.seal_next_plain(self.recipients.keys())
-        except (OSError, SealingError) as error:
-            self._seen["sealing_error"] = str(error)
-            self.health.record("error", "encryption", f"Could not encrypt an older clip: {error}")
-            return
-        if event:
-            log.info("Encrypted earlier clip %s", event.id)
-
-    def _seal_older_frames_and_clips(self) -> None:
-        """Seal time-lapse frames and manual clips recorded before keys were enrolled."""
-        if not self.recipients.enrolled or self._seen["sealing_error"]:
-            return
-        keys = self.recipients.keys()
-        try:
-            frames = self.timelapse.seal_plain(keys)
-            clip = None if frames else self.storage.seal_next_plain_clip(keys)
-        except (OSError, SealingError) as error:
-            self._seen["sealing_error"] = str(error)
-            self.health.record(
-                "error",
-                "encryption",
-                f"Could not encrypt older time-lapse or test footage: {error}",
-            )
-            return
-        if frames or clip:
-            log.info("Encrypted %s earlier time-lapse frames, clip %s", frames, clip)
-        else:
-            self._backlog = False
-
     def _poll_incidents(self) -> None:
         """Turn counters and error fields from the workers into health-log entries."""
         seen = self._seen
@@ -304,6 +270,14 @@ class Controller:
             seen["timelapse_error"] = self.timelapse.last_error
             if self.timelapse.last_error:
                 self.health.record("warning", "timelapse", self.timelapse.last_error)
+        if self.sealed.last_error != seen["sealing_error"]:
+            seen["sealing_error"] = self.sealed.last_error
+            if self.sealed.last_error:
+                self.health.record(
+                    "error",
+                    "encryption",
+                    f"Could not encrypt older footage: {seen['sealing_error']}",
+                )
         if not seen["clock_warned"] and not clock_ok():
             seen["clock_warned"] = True
 
@@ -390,28 +364,21 @@ class Controller:
 
     def record(self) -> dict:
         """A manual test clip. With keys enrolled it is assembled in RAM and only sealed on disk."""
-        keys = self.recipients.keys()
-        partial, final = self.storage.reserve_clip(sealed=bool(keys))
-        plain = partial
-        if keys:
-            self.work_folder.mkdir(parents=True, exist_ok=True)
-            plain = self.work_folder / ("manual-" + final.name.split(".")[0] + ".mp4.partial")
-        try:
-            recent = self._buffered(self.config.clip_seconds)
-            if recent:
-                try:
-                    assemble(recent, plain, runner=self.camera.runner)
-                except ClipError as error:
-                    raise CameraError(str(error)) from None
-            else:
-                self.camera.record(plain, self.config.clip_seconds)
-            self.last_camera_ok = int(time.time())
-            if keys:
-                seal_file(plain, partial, keys)
-            return self.storage.commit_clip(partial, final)
-        finally:
-            partial.unlink(missing_ok=True)
-            plain.unlink(missing_ok=True)
+        target = self.storage.reserve_clip()
+        recent = self._buffered(self.config.clip_seconds)
+
+        def produce(path: Path) -> None:
+            if not recent:
+                self.camera.record(path, self.config.clip_seconds)
+                return
+            try:
+                assemble(recent, path, runner=self.camera.runner)
+            except ClipError as error:
+                raise CameraError(str(error)) from None
+
+        clip = self.sealed.write(target, produce)
+        self.last_camera_ok = int(time.time())
+        return self.storage.describe(clip)
 
     def recordings(self) -> list[dict]:
         return self.storage.clips()
@@ -483,6 +450,19 @@ class Controller:
         event = self.store.replace_header(event_id, header)
         return event.to_dict() if event else None
 
+    def recording_header(self, clip_id: str) -> bytes | None:
+        self.storage.check()
+        path = self.storage.clip_path(clip_id)
+        return self.sealed.header(path) if path else None
+
+    def replace_recording_header(self, clip_id: str, header: bytes) -> dict | None:
+        """A key holder added a recipient to an older manual clip (restoring access)."""
+        self.storage.check()
+        path = self.storage.clip_path(clip_id)
+        if path is None or self.sealed.replace_header(path, header) is None:
+            return None
+        return self.storage.describe(path)
+
     def timelapse_headers(self, day: str) -> list[tuple[str, bytes]]:
         self.storage.check()
         return self.timelapse.headers(day)
@@ -510,8 +490,7 @@ class Controller:
         """Replace the keys new recordings are sealed to. Existing sealed files are unchanged."""
         recipients = parse_recipients(payload)
         self.recipients.replace(recipients)
-        self._seen["sealing_error"] = None
-        self._backlog = True
+        self.sealed.keys_changed()
         self.timelapse.clear_exports()
         self.health.record(
             "info", "encryption", "Recording keys enrolled",

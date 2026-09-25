@@ -9,6 +9,7 @@ from io import BytesIO
 import pytest
 
 from solstead import sealing
+from solstead.sealed import SealedRecordings
 from solstead.timelapse import TimeLapse, TimeLapseSealed, TimeLapseSettings
 from tests.test_api import api, call  # noqa: F401  (fixture)
 from tests.test_encryption import enrolment, key, put
@@ -19,7 +20,7 @@ def sealed_lapse(tmp_path, recipients):
     now = {"t": local(9)}
     lapse = TimeLapse(
         tmp_path, TimeLapseSettings(), Capturer(), clock=lambda: now["t"],
-        recipients=lambda: recipients,
+        sealed=SealedRecordings(lambda: recipients, tmp_path / "ram"),
     )  # fmt: skip
     return lapse, now
 
@@ -100,9 +101,12 @@ def test_older_plain_frames_are_sealed_in_batches(tmp_path):
     recipients = [sealing.parse_recipient(public)]
     (folder / "091000.jpg.age").write_bytes(sealing.seal_bytes(b"sealed earlier", recipients))
 
-    assert lapse.seal_plain(recipients, limit=2) == 2
-    assert lapse.seal_plain(recipients, limit=2) == 1
-    assert lapse.seal_plain(recipients, limit=2) == 0
+    keys.extend(recipients)
+    lapse.sealed.add_source(lapse.plain_frames)
+    budget = 2 * 1000  # two plain frames' worth
+    assert lapse.sealed.seal_older(budget_bytes=budget) == 2
+    assert lapse.sealed.seal_older(budget_bytes=budget) == 1  # the crash leftover: plain deleted
+    assert lapse.sealed.seal_older(budget_bytes=budget) == 0 and not lapse.sealed.pending
     names = sorted(p.name for p in folder.iterdir())
     assert names == ["090000.jpg.age", "090500.jpg.age", "091000.jpg.age"]
     assert sealing.open_bytes((folder / "090000.jpg.age").read_bytes(), secret) == plain
@@ -120,7 +124,7 @@ def lapse_on(api):  # noqa: F811
     lapse = TimeLapse(
         controller.config.storage_path, TimeLapseSettings(), Capturer(),
         runner=controller.camera.runner, clock=lambda: now["t"],
-        recipients=controller.recipients.keys,
+        sealed=controller.sealed,
     )  # fmt: skip
     controller.timelapse = lapse
     return lapse, now
@@ -141,17 +145,14 @@ def test_enrolment_seals_older_frames_and_clips_and_drops_plain_exports(api):  #
     assert put(api, "/v1/encryption", payload)[0].status == 200
     assert not list(lapse.exports.iterdir())  # plaintext videos go at enrolment
 
-    controller._seal_older_frames_and_clips()  # frames first
+    assert controller.sealed.seal_older() == 3  # two frames and the manual clip
     assert controller.encryption_status()["unencrypted_frames"] == 0
-    controller._seal_older_frames_and_clips()  # then the manual clip
     listed = json.loads(call(api, "GET", "/v1/recordings")[1])["recordings"]
     assert [(c["id"], c["encrypted"]) for c in listed] == [(clip["id"] + ".age", True)]
     assert listed[0]["created_unix"] == clip["created_unix"]
     manual = controller.config.storage_path / "manual" / listed[0]["id"]
     assert sealing.open_bytes(manual.read_bytes(), device).startswith(b"\x00\x00\x00\x1cftyp")
-    assert controller._backlog is True
-    controller._seal_older_frames_and_clips()
-    assert controller._backlog is False  # nothing left: stop scanning every tick
+    assert controller.sealed.pending is False  # nothing left: stop scanning every tick
 
     response, body = call(api, "GET", "/v1/timelapse/2026-09-22/video.mp4")
     assert response.status == 409 and json.loads(body)["encrypted"] is True
@@ -172,8 +173,8 @@ def test_enrolled_manual_clip_is_assembled_in_ram_and_sealed(api):  # noqa: F811
     )
     # ffmpeg wrote the plaintext into the RAM work folder, which is emptied afterwards.
     written = controller.camera.runner.calls[-1][-1]
-    assert written.startswith(str(controller.work_folder))
-    assert not list(controller.work_folder.iterdir())
+    assert written.startswith(str(controller.sealed.work_folder))
+    assert not list(controller.sealed.work_folder.iterdir())
 
 
 def test_sealed_frames_are_served_as_opaque_files(api):  # noqa: F811
@@ -244,3 +245,33 @@ def test_frame_header_replacement_is_checked(api):  # noqa: F811
         response, body = put(api, path, payload)
         assert response.status == 400 and message in body["error"], body
     assert (lapse.folder / "2026-09-22" / "090000.jpg.age").read_bytes() == before
+
+
+def test_new_phone_rewraps_an_older_manual_clips_header(api):  # noqa: F811
+    from tests.test_encryption import put_raw
+
+    (old_phone, recovery), payload = enrolment("device", "recovery")
+    put(api, "/v1/encryption", payload)
+    clip = json.loads(call(api, "POST", "/v1/recordings")[1])
+    assert clip["encrypted"] is True
+    path = f"/v1/recordings/{clip['id']}/header"
+    response, header = call(api, "GET", path)
+    assert response.status == 200 and header.startswith(b"age-encryption.org/v1\n")
+
+    new_phone, new_pub = key()
+    rewrapped = sealing.rewrap_header(header, recovery, sealing.parse_recipient(new_pub))
+    response, body = put_raw(api, path, rewrapped)
+    assert response.status == 200 and body["id"] == clip["id"] and body["encrypted"] is True
+    stored = (api.controller.config.storage_path / "manual" / clip["id"]).read_bytes()
+    assert body["size_bytes"] == len(stored)
+    for secret in (new_phone, old_phone, recovery):
+        assert sealing.open_bytes(stored, secret).startswith(b"\x00\x00\x00\x1cftyp")
+
+    only_new = sealing.read_header(
+        BytesIO(sealing.seal_bytes(b"x", [sealing.parse_recipient(new_pub)]))
+    )[0]
+    assert put_raw(api, path, only_new)[0].status == 400  # would drop keys
+    assert put_raw(api, path, b"")[0].status == 400
+    plain_id = clip["id"].removesuffix(".age")
+    assert call(api, "GET", f"/v1/recordings/{plain_id}/header")[0].status == 404
+    assert call(api, "GET", "/v1/recordings/..%2Fx.mp4.age/header")[0].status == 404
