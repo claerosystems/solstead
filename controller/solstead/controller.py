@@ -23,6 +23,7 @@ from .recipients import parse as parse_recipients
 from .sdnotify import notify
 from .sealing import SealingError, seal_file
 from .storage import Storage, StorageUnavailable, ram_folder
+from .telemetry import Telemetry
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
 
@@ -33,11 +34,22 @@ RETRY_SECONDS = 30
 STORAGE_CHECK_SECONDS = 5
 THERMAL_CHECK_SECONDS = 10
 CLOCK_SANITY_UNIX = 1767225600  # 2026-01-01: earlier than this and the clock is not set
+# systemd-timesyncd creates this once NTP has set the clock since boot.
+TIMESYNC_MARKER = Path("/run/systemd/timesync/synchronized")
 log = logging.getLogger("solstead")
 
 
 def clock_ok(now: float | None = None) -> bool:
     return (time.time() if now is None else now) >= CLOCK_SANITY_UNIX
+
+
+def clock_synchronized(marker: Path = TIMESYNC_MARKER) -> bool:
+    """NTP has set the clock since boot. After a power cut the Pi's clock resumes from the last
+    saved time, which passes clock_ok() while still being wrong. Without timesyncd (development
+    machines) fall back to the sanity check."""
+    if marker.parent.is_dir():
+        return marker.exists()
+    return clock_ok()
 
 
 class Controller:
@@ -89,6 +101,10 @@ class Controller:
             recipients=self.recipients.keys,
         )  # fmt: skip
         self.health = HealthLog(config.storage_path / HEALTH_FILE, guard=self._storage_ok)
+        self.telemetry = Telemetry(
+            config.storage_path, config.telemetry_settings_path,
+            guard=self._storage_ok, synced=clock_synchronized,
+        )  # fmt: skip
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
         self.events_running = False
@@ -148,6 +164,7 @@ class Controller:
             notify("WATCHDOG=1")
             self._check_storage()
             self._check_thermal()
+            self.telemetry.tick()
             if self.config.events_enabled:
                 self._ensure_events()
             self._poll_incidents()
@@ -205,6 +222,12 @@ class Controller:
         before, now = self.thermal, self.thermal_reader()
         self.thermal = now
         temp = now.temperature_c
+        flags = now.flags_available
+        self.telemetry.add(
+            cpu_c=temp,
+            undervoltage=now.undervoltage_now if flags else None,
+            throttled=now.throttled_now if flags else None,
+        )
         if now.undervoltage_now and not before.undervoltage_now:
             self.health.record("error", "power", "Under-voltage: the Pi's supply is sagging")
         elif before.undervoltage_now and not now.undervoltage_now:
@@ -360,6 +383,7 @@ class Controller:
             "live": self.live.status(),
             "timelapse": self.timelapse.status(),
             "encryption": self.encryption_status(),
+            "telemetry": self.telemetry.status(),
             "health": {
                 "clock_ok": clock_ok(),
                 "last_day": self.health.counts(int(time.time()) - 86400),
@@ -428,6 +452,18 @@ class Controller:
         if self.config.settings_path:
             save_settings(self.config.settings_path, settings)
         return self.timelapse.status()
+
+    def update_telemetry(self, changes: dict) -> dict:
+        """The owner changed how long telemetry is kept; shortening deletes older days now."""
+        if "retention_days" in changes:
+            before = self.telemetry.retention_days
+            self.telemetry.set_retention(changes["retention_days"])
+            if self.telemetry.retention_days != before:
+                self.health.record(
+                    "info", "telemetry",
+                    f"Telemetry kept for {self.telemetry.retention_days} days",
+                )  # fmt: skip
+        return self.telemetry.status()
 
     def start_live(self, quality: str = "low") -> dict:
         """Start live view (or keep it alive) and wait until it can be played."""

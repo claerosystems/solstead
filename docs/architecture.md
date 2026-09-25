@@ -70,8 +70,12 @@ In the order the product notes prioritise validation:
    time-to-first-frame target with the VPN in place.
 3. Cellular remote access without vendor servers, after the carrier and modem validation in
    [cellular-validation-plan.md](cellular-validation-plan.md).
-4. SMS alerts, reduced-power mode and power telemetry once the power path is measured.
-5. Encrypted local storage is built (ADR 0003): event clips, time-lapse frames and manual clips
+4. Telemetry (product notes, 2026-09-25): one-minute battery, solar and temperature history on
+   the SSD with an owner-chosen retention, shown as charts in the app. Stage 1 uses the Pi's own
+   temperature and supply flags; stage 2 adds DS18B20 battery and enclosure probes; stage 3 reads
+   a Victron SmartSolar charger over Bluetooth.
+5. SMS alerts and reduced-power mode, reading telemetry once the power path is measured.
+6. Encrypted local storage is built (ADR 0003): event clips, time-lapse frames and manual clips
    are sealed to owner-held keys, and the phone decrypts clips and assembles encrypted
    time-lapse days. Next, customer-controlled off-site backup uploads the same sealed files
    (ADR 0002).

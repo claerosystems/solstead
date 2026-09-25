@@ -1,3 +1,4 @@
+import os
 import subprocess
 from datetime import datetime
 
@@ -148,6 +149,8 @@ def test_export_video_caches_and_validates(tmp_path):
     lapse.tick(local(9, 10))
     assert lapse.export_video("2026-09-22").name == "2026-09-22-091000-12fps.mp4"
     assert not list(lapse.exports.glob("*.txt"))
+    for path in lapse.exports.iterdir():  # made "at" 09:10 on the 22nd, whatever today is
+        os.utime(path, (local(9, 10), local(9, 10)))
     now["t"] = local(9) + 3 * 86400
     lapse.prune()
     assert list(lapse.exports.iterdir()) == []

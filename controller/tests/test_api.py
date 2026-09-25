@@ -266,3 +266,28 @@ def test_health_route(api):
     assert len(json.loads(body)["entries"]) == 2
     response, _ = call(api, "GET", "/v1/health?level=debug")
     assert response.status == 400
+
+
+def test_telemetry_history_and_retention(api, config):
+    response, body = call(api, "GET", "/v1/telemetry?range=7d")
+    history = json.loads(body)
+    assert response.status == 200
+    assert history["range"] == "7d" and history["bucket_seconds"] == 1800
+    assert history["points"] == []
+    response, body = call(api, "GET", "/v1/telemetry?range=forever")
+    assert response.status == 400 and "range" in json.loads(body)["error"]
+
+    conn = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=5)
+    conn.request("PUT", "/v1/telemetry", body=json.dumps({"retention_days": 90}),
+                 headers={"Authorization": "Bearer " + TOKEN})  # fmt: skip
+    response = conn.getresponse()
+    status = json.loads(response.read())
+    assert response.status == 200 and status["retention_days"] == 90
+    conn.request("PUT", "/v1/telemetry", body=json.dumps({"retention_days": 10}),
+                 headers={"Authorization": "Bearer " + TOKEN})  # fmt: skip
+    response = conn.getresponse()
+    assert response.status == 400 and "retention_days" in json.loads(response.read())["error"]
+    conn.close()
+    assert json.loads(config.telemetry_settings_path.read_text()) == {"retention_days": 90}
+    _, body = call(api, "GET", "/v1/status")
+    assert json.loads(body)["telemetry"]["retention_days"] == 90

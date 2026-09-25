@@ -32,6 +32,7 @@ struct ContentView: View {
             .sheet(isPresented: Binding(get: { model.healthEntries != nil }, set: { if !$0 { model.healthEntries = nil } })) {
                 HealthLogView(entries: model.healthEntries ?? [])
             }
+            .sheet(isPresented: $model.showTelemetry) { TelemetryView() }
             .sheet(item: $model.playingClip) { clip in
                 ClipPlayerView(clip: clip)
             }
@@ -70,6 +71,9 @@ struct SettingsView: View {
                 }
                 if let lapse = model.timelapse {
                     TimeLapseSettingsSection(lapse: lapse)
+                }
+                if let telemetry = model.telemetry {
+                    TelemetrySettingsSection(telemetry: telemetry)
                 }
                 Section("About") {
                     HStack(spacing: 14) {
@@ -304,6 +308,9 @@ struct HealthSection: View {
                         HealthRow(entry: entry)
                     }
                     Button("Show health log", systemImage: "list.bullet.rectangle") { Task { await model.showHealth() } }
+                }
+                if status.telemetry != nil {
+                    Button("Power & temperature history", systemImage: "chart.xyaxis.line") { model.showTelemetry = true }
                 }
             } label: {
                 HStack(spacing: 10) {
