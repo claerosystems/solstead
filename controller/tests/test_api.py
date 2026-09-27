@@ -70,6 +70,13 @@ def test_record_then_list(api):
     assert response.status == 200 and json.loads(body)["recordings"][0]["id"] == clip["id"]
 
 
+def test_recordings_list_accepts_a_limit(api):
+    for _ in range(3):
+        call(api, "POST", "/v1/recordings")
+    assert len(json.loads(call(api, "GET", "/v1/recordings?limit=2")[1])["recordings"]) == 2
+    assert len(json.loads(call(api, "GET", "/v1/recordings")[1])["recordings"]) == 3
+
+
 def test_unknown_route(api):
     response, _ = call(api, "GET", "/v1/nope")
     assert response.status == 404

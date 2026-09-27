@@ -214,7 +214,7 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | --- | --- |
 | `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, an `events` block (running, buffer age, motion active, camera subscription, counts, allocation), a `live` block (available, active, quality, ready), and a `timelapse` block (settings and counts). |
 | `GET /v1/camera/snapshot[?width=N]` | One JPEG frame (`image/jpeg`) at `snapshot_width` by default; `width=0` returns the camera's full resolution, taken from the buffer. |
-| `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix, encrypted}, …]}`, newest first, up to 200. |
+| `GET /v1/recordings[?limit=N]` | `{"recordings": [{id, size_bytes, created_unix, encrypted}, …]}`, newest first, 200 unless `limit` says otherwise (up to 100000, as for events). |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD (sealed as `<id>.mp4.age` when keys are enrolled); returns its entry with status 201. |
 | `GET /v1/recordings/{id}/header` | Just the age header of a sealed manual clip (`<id>` ends in `.mp4.age`), for a key holder to re-wrap. 404 for unencrypted clips. |
 | `PUT /v1/recordings/{id}/header` | Replace a sealed manual clip's header with a re-wrapped one (raw bytes), with the same checks as for events. Returns the clip's entry. |

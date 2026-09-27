@@ -380,8 +380,8 @@ class Controller:
         self.last_camera_ok = int(time.time())
         return self.storage.describe(clip)
 
-    def recordings(self) -> list[dict]:
-        return self.storage.clips()
+    def recordings(self, limit: int = 200) -> list[dict]:
+        return self.storage.clips(limit)
 
     def frame_for_timelapse(self, width: int) -> bytes:
         recent = self._buffered(3 * self.config.segment_seconds + 2)

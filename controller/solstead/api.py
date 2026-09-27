@@ -145,7 +145,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.reply(400, {"error": "width must be 0 (full) to 8192"})
                 return self.reply(200, controller.snapshot(width), "image/jpeg")
             if get and path == "/v1/recordings":
-                return self.reply(200, {"recordings": controller.recordings()})
+                limit = min(max(int(query.get("limit", "200") or 200), 1), 100000)
+                return self.reply(200, {"recordings": controller.recordings(limit)})
             if self.command == "POST" and path == "/v1/recordings":
                 return self.reply(201, controller.record())
             if get and path == "/v1/events":

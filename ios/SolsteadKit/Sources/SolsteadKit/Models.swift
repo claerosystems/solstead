@@ -250,6 +250,18 @@ public struct EncryptionStatus: Decodable, Equatable, Sendable {
     public let unencryptedFrames: Int?
 
     public var deviceKeys: [Key] { recipients.filter { $0.role == "device" } }
+
+    /// The one recovery key new recordings are sealed to, if encryption is on.
+    public var recoveryKey: Key? { recipients.first { $0.role == "recovery" } }
+
+    /// The body that adds one phone while keeping every other phone enrolled.
+    /// `PUT /v1/encryption` replaces the whole set, so the others have to be sent again.
+    /// `recovery` is the recovery public key to seal to: the current one, or a new one at setup.
+    public func enrolment(adding device: (label: String, publicKey: String), recovery: String) -> Enrolment {
+        let others = deviceKeys.filter { $0.publicKey != device.publicKey }
+        return Enrolment(devices: others.map { ($0.label, $0.publicKey) } + [(device.label, device.publicKey)],
+                         recoveryPublicKey: recovery)
+    }
 }
 
 /// Body of `PUT /v1/encryption`.

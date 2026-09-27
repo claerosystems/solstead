@@ -24,11 +24,9 @@ extension ControllerModel {
     func finishEncryptionSetup(_ recovery: RecoveryKey) async {
         await perform {
             let device = try DeviceKeyStore.loadOrCreate()
-            let others = (encryption?.deviceKeys ?? []).filter { $0.publicKey != device.recipient }
-            let enrolment = Enrolment(
-                devices: others.map { ($0.label, $0.publicKey) } + [(UIDevice.current.name, device.recipient)],
-                recoveryPublicKey: recovery.recipient)
-            _ = try await connected().enroll(enrolment)
+            let current = try await connected().encryption()
+            _ = try await connected().enroll(current.enrolment(adding: (UIDevice.current.name, device.recipient),
+                                                               recovery: recovery.recipient))
             try await load(with: try connected())
             recoverySetup = nil
             message = "Encryption is on. New recordings can only be opened with this phone or your recovery key."
@@ -36,77 +34,59 @@ extension ControllerModel {
     }
 
     /// The public half of the recovery key new recordings are sealed to.
-    var recoveryPublicKey: String? {
-        encryption?.recipients.first { $0.role == "recovery" }?.publicKey
-    }
+    var recoveryPublicKey: String? { encryption?.recoveryKey?.publicKey }
 
-    /// Restores access on this phone with the owner's recovery key: enrols this phone's key and
-    /// adds it to every older sealed clip's header, one small download and upload per clip. The
-    /// recovery key is used here and not kept. Returns true when finished.
+    /// Restores access on this phone with the owner's recovery key (SolsteadKit's AccessRestorer).
+    /// The recovery key is used here and not kept. Returns true when finished.
     func restoreAccess(with recovery: AgeIdentity) async -> Bool {
         var finished = false
         await perform {
-            guard let expected = recoveryPublicKey else {
-                throw ControllerError.controller("Encryption is not on for this controller.", status: 0)
-            }
-            guard recovery.recipient == expected else {
-                throw ControllerError.controller(
-                    "That recovery key is not the one this controller uses. Check it is the key from the most recent setup.",
-                    status: 0)
-            }
             let client = try connected()
-            let device = try DeviceKeyStore.loadOrCreate()
-            if !thisPhoneEnrolled {
-                let others = (encryption?.deviceKeys ?? []).filter { $0.publicKey != device.recipient }
-                _ = try await client.enroll(Enrolment(
-                    devices: others.map { ($0.label, $0.publicKey) } + [(UIDevice.current.name, device.recipient)],
-                    recoveryPublicKey: expected))
-            }
-            let sealed = try await client.events(limit: 100_000).filter(\.isEncrypted)
-            var unlocked = 0, already = 0, unreadable = 0
-            for (index, event) in sealed.enumerated() {
-                message = "Unlocking older recordings for this phone: \(index + 1) of \(sealed.count)…"
-                do {
-                    let header = try await client.eventHeader(event)
-                    if Age.canOpen(header: header, with: [device]) {
-                        already += 1
-                        continue
-                    }
-                    try await client.replaceEventHeader(event, with: Age.rewrap(header: header, using: recovery, adding: device.recipient))
-                    unlocked += 1
-                } catch SealingError.noMatchingKey {
-                    unreadable += 1  // sealed under an earlier setup with a different recovery key
-                } catch let ControllerError.controller(_, status) where status == 404 {
-                    continue  // overwritten while we were working
+            let restorer = AccessRestorer(client: client, recovery: recovery,
+                                          device: try DeviceKeyStore.loadOrCreate(), deviceLabel: UIDevice.current.name)
+            do {
+                let outcome = try await restorer.restore(status: try await client.encryption()) { progress in
+                    await MainActor.run { self.message = ControllerModel.describe(progress) }
                 }
+                try await load(with: client)
+                message = ControllerModel.summary(of: outcome)
+                finished = true
+            } catch let interrupted as AccessRestorer.Interrupted {
+                try? await load(with: client)
+                let done = interrupted.outcome.events.unlocked + interrupted.outcome.recordings.unlocked
+                    + interrupted.outcome.frames.unlocked
+                message = "Restoring access stopped: \(interrupted.localizedDescription) "
+                    + (done > 0 ? "\(done) item\(done == 1 ? " was" : "s were") unlocked first. " : "")
+                    + "Run it again to finish; nothing is done twice."
             }
-            // Time-lapse frames: one header download and a few batched uploads per day.
-            let days = try await client.timelapse().days?.filter(\.isEncrypted) ?? []
-            var frames = ControllerClient.RewrapCount()
-            for (index, day) in days.enumerated() {
-                message = "Unlocking older time-lapse days for this phone: \(index + 1) of \(days.count)…"
-                do {
-                    let count = try await client.rewrapTimelapseDay(day.date, using: recovery, adding: device)
-                    frames.unlocked += count.unlocked
-                    frames.already += count.already
-                    frames.unreadable += count.unreadable
-                } catch let ControllerError.controller(_, status) where status == 404 {
-                    continue  // the whole day was overwritten while we were working
-                }
-            }
-            try await load(with: client)
-            let opened = [(unlocked, "older recording"), (frames.unlocked, "time-lapse frame")]
-                .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
-            var summary = "This phone can open recordings again. "
-                + (opened.isEmpty ? "Nothing older needed unlocking" : "Unlocked " + opened.joined(separator: " and "))
-            if already > 0 { summary += "; \(already) recording\(already == 1 ? " was" : "s were") already open on this phone" }
-            if unreadable + frames.unreadable > 0 {
-                summary += "; \(unreadable) recording\(unreadable == 1 ? "" : "s") and \(frames.unreadable) frame\(frames.unreadable == 1 ? "" : "s") belong to an earlier recovery key and stay locked"
-            }
-            message = summary + "."
-            finished = true
         }
         return finished
+    }
+
+    private static func describe(_ progress: AccessRestorer.Progress) -> String {
+        let what: String
+        switch progress.stage {
+        case .events: what = "older recordings"
+        case .recordings: what = "older test clips"
+        case .timeLapseDays: what = "older time-lapse days"
+        }
+        return "Unlocking \(what) for this phone: \(progress.done + 1) of \(progress.total)…"
+    }
+
+    private static func summary(of outcome: AccessRestorer.Outcome) -> String {
+        func plural(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
+        let opened = [(outcome.events.unlocked, "older recording"), (outcome.recordings.unlocked, "test clip"),
+                      (outcome.frames.unlocked, "time-lapse frame")]
+            .filter { $0.0 > 0 }.map { plural($0.0, $0.1) }
+        var summary = "This phone can open recordings again. "
+            + (opened.isEmpty ? "Nothing older needed unlocking" : "Unlocked " + opened.joined(separator: " and "))
+        let already = outcome.events.already + outcome.recordings.already
+        if already > 0 { summary += "; \(plural(already, "recording")) \(already == 1 ? "was" : "were") already open on this phone" }
+        let locked = outcome.events.unreadable + outcome.recordings.unreadable
+        if locked + outcome.frames.unreadable > 0 {
+            summary += "; \(plural(locked, "recording")) and \(plural(outcome.frames.unreadable, "frame")) belong to an earlier recovery key and stay locked"
+        }
+        return summary + "."
     }
 
     func disableEncryption() async {
