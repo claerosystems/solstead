@@ -65,3 +65,11 @@ _Avoid_: Owner token (which authorizes requests but decrypts nothing)
 **Recovery key**:
 A private key generated during setup and saved by the owner outside the phone and controller, as printed text or a file. It opens every sealed recording and backup when all device keys are lost.
 _Avoid_: Password, backup code
+
+**Telemetry**:
+Measurements of the system's condition taken at a fixed interval and kept for a limited period, such as battery voltage and current, solar power, and the battery, enclosure and processor temperatures. Owners view it as history graphs.
+_Avoid_: Health log, metrics, stats
+
+**Health log**:
+The record of notable incidents on the controller, such as a camera lost, storage returned, or under-voltage, each written when it happens.
+_Avoid_: Telemetry, event (an event is a motion recording)

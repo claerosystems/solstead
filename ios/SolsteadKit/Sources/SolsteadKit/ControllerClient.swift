@@ -162,6 +162,17 @@ public struct ControllerClient: Sendable {
         return count
     }
 
+    /// Summarised telemetry for a range; the controller picks the bucket size.
+    public func telemetry(range: TelemetryRange) async throws -> TelemetryHistory {
+        try decode(TelemetryHistory.self, from: await request("v1/telemetry?range=\(range.rawValue)"))
+    }
+
+    /// Changes how long telemetry is kept. Shortening it deletes older days on the controller.
+    public func updateTelemetry(_ update: TelemetrySettingsUpdate) async throws -> TelemetryStatus {
+        let body = try ControllerJSONEncoder.encoder.encode(update)
+        return try decode(TelemetryStatus.self, from: await request("v1/telemetry", method: "PUT", body: body))
+    }
+
     /// The controller's health log, newest first. `minimumLevel` is info, warning or error.
     public func health(minimumLevel: String = "info", limit: Int = 100) async throws -> [HealthEntry] {
         try decode(HealthList.self, from: await request("v1/health?level=\(minimumLevel)&limit=\(limit)")).entries

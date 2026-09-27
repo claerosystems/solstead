@@ -44,6 +44,7 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let health: Health?
     public let thermal: Thermal?
     public let encryption: EncryptionStatus?
+    public let telemetry: TelemetryStatus?
     public let recordingMode: String
     public let remoteAccess: Bool
 }

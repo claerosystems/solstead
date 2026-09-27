@@ -16,6 +16,7 @@ from . import __version__
 from .controller import Unavailable
 from .recipients import RecipientsError
 from .sealing import MAX_HEADER, SealingError
+from .telemetry import TelemetryError
 from .timelapse import TimeLapseError, TimeLapseSealed
 
 JSON = "application/json"
@@ -164,6 +165,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(400, {"error": "level must be info, warning or error"})
                 limit = min(max(int(query.get("limit", "100") or 100), 1), 500)
                 return self.reply(200, {"entries": controller.health.recent(limit, level)})
+            if get and path == "/v1/telemetry":
+                return self.reply(200, controller.telemetry.history(query.get("range", "24h")))
+            if self.command == "PUT" and path == "/v1/telemetry":
+                return self.reply(200, controller.update_telemetry(self.read_json()))
             if get and path == "/v1/timelapse":
                 return self.reply(
                     200, {**controller.timelapse.status(), "days": controller.timelapse.days()}
@@ -259,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "Event not found"})
                 return self.send_file(found[1], SEALED if found[0].encrypted else "video/mp4")
             return self.reply(404, {"error": "Not found"})
-        except (TimeLapseError, RecipientsError, SealingError) as error:
+        except (TimeLapseError, RecipientsError, SealingError, TelemetryError) as error:
             return self.reply(400, {"error": str(error)})
         except Unavailable as error:
             return self.reply(503, {"error": str(error)})

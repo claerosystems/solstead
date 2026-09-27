@@ -23,6 +23,7 @@ final class ControllerModel: ObservableObject {
     @Published var liveSession: LiveSession?
     @Published var showSettings = false
     @Published var healthEntries: [HealthEntry]?  // non-nil while the health sheet is shown
+    @Published var showTelemetry = false
     @Published private(set) var snapshot: Snapshot?
     @Published var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false

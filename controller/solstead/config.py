@@ -54,6 +54,8 @@ class Config:
     settings_path: Path | None = None
     # Public keys recordings are sealed to, enrolled from the owner's phone.
     recipients_path: Path | None = None
+    # Owner-chosen telemetry retention, also beside config.json.
+    telemetry_settings_path: Path | None = None
 
     @property
     def events_enabled(self) -> bool:
@@ -130,6 +132,11 @@ class Config:
             recipients_path=(
                 Path(data["recipients_path"]) if data.get("recipients_path") else None
             ),
+            telemetry_settings_path=(
+                Path(data["telemetry_settings_path"])
+                if data.get("telemetry_settings_path")
+                else None
+            ),
         )
 
     @classmethod
@@ -148,13 +155,16 @@ class Config:
         data["recipients_path"] = data.get("recipients_path") or str(
             path.with_name("recipients.json")
         )
+        data["telemetry_settings_path"] = data.get("telemetry_settings_path") or str(
+            path.with_name("telemetry.json")
+        )
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         for key in (
             "storage_path", "tls_cert", "tls_key", "settings_path", "buffer_path",
-            "recipients_path",
+            "recipients_path", "telemetry_settings_path",
         ):  # fmt: skip
             if data[key] is not None:
                 data[key] = str(data[key])

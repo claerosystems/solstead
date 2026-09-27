@@ -12,5 +12,5 @@ struct SolsteadApp: App {
     }
 }
 
-// Brand colours live in Assets.xcassets: AccentColor is Night (Ivory in dark mode) and
+// Brand colours live in Assets.xcassets: AccentColor is Sky (a lighter sky in dark mode) and
 // SunColor is the sun from the mark. See docs/brand/README.md.
