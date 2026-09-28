@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # WireGuard hub on an owner-controlled cloud server, so the phone can reach a controller that sits
 # behind carrier NAT: the controller keeps a tunnel open to the hub and the phone joins the same
-# tunnel network. The hub forwards only phone -> controller API; it holds no Solstead data or keys.
+# tunnel network. The hub forwards phones to the controller API and admin laptops to the API and
+# SSH, nothing else; it holds no Solstead data or keys.
 #
 # Run as root on the server (Debian/Ubuntu):
 #   wireguard-hub.sh setup                         install, create the hub key, firewall, start wg0
 #   wireguard-hub.sh add-peer NAME IP PUBLIC_KEY   e.g. add-peer controller 10.77.0.2 <key>
 #   wireguard-hub.sh phone [NAME] [IP]             new phone peer; shows its config as a QR code
+#   wireguard-hub.sh laptop [NAME] [IP]            new admin laptop; prints its config file to stdout
+#     (run from the laptop: ssh root@HUB 'wireguard-hub.sh laptop mac' > solstead.conf)
 #
-# Addresses: hub 10.77.0.1, controller 10.77.0.2, phones 10.77.0.3 and up.
+# Addresses: hub 10.77.0.1, controller 10.77.0.2, phones 10.77.0.3-99 (API only),
+# admin laptops 10.77.0.100-149 (API and SSH).
 set -euo pipefail
 NET=10.77.0
 PORT=51820
@@ -38,7 +42,8 @@ table inet solstead_hub {
 	chain forward {
 		type filter hook forward priority 0; policy drop;
 		ct state established,related accept
-		iifname "wg0" oifname "wg0" ip saddr $NET.3-$NET.254 ip daddr $NET.2 tcp dport $API_PORT accept
+		iifname "wg0" oifname "wg0" ip saddr $NET.3-$NET.99 ip daddr $NET.2 tcp dport $API_PORT accept
+		iifname "wg0" oifname "wg0" ip saddr $NET.100-$NET.149 ip daddr $NET.2 tcp dport { 22, $API_PORT } accept
 	}
 }
 NFT
@@ -84,22 +89,32 @@ add_peer() {
 	echo "Added $name at $ip"
 }
 
-phone() {
-	local name=${1:-phone} ip=${2:-$NET.3}
+# A new peer's config. Its private key is generated here, handed out once and not kept.
+new_peer_config() {
+	local name=$1 ip=$2
 	local key
 	key=$(wg genkey)
-	add_peer "$name" "$ip" "$(wg pubkey <<< "$key")"
+	add_peer "$name" "$ip" "$(wg pubkey <<< "$key")" >&2
+	printf '[Interface]\nPrivateKey = %s\nAddress = %s/32\nMTU = 1280\n\n[Peer]\nPublicKey = %s\nEndpoint = %s:%s\nAllowedIPs = %s.2/32\nPersistentKeepalive = 25\n' \
+		"$key" "$ip" "$(wg pubkey < /etc/wireguard/hub.key)" "$(public_ip)" "$PORT" "$NET"
+}
+
+phone() {
 	local config
-	config=$(printf '[Interface]\nPrivateKey = %s\nAddress = %s/32\n\n[Peer]\nPublicKey = %s\nEndpoint = %s:%s\nAllowedIPs = %s.2/32\nPersistentKeepalive = 25\n' \
-		"$key" "$ip" "$(wg pubkey < /etc/wireguard/hub.key)" "$(public_ip)" "$PORT" "$NET")
-	# The phone's private key exists only in this QR code and the phone; it is not stored here.
+	config=$(new_peer_config "${1:-phone}" "${2:-$NET.3}")
 	qrencode -t ansiutf8 <<< "$config"
 	echo "Scan with the WireGuard app (+ > Create from QR code). The phone reaches only the controller, at https://$NET.2:$API_PORT"
+}
+
+laptop() {
+	new_peer_config "${1:-laptop}" "${2:-$NET.100}"
+	echo "Import into the WireGuard app, then delete the file. This laptop reaches the controller's API and SSH at $NET.2." >&2
 }
 
 case "${1:-}" in
 	setup) setup ;;
 	add-peer) [ $# -eq 4 ] || { echo "usage: $0 add-peer NAME IP PUBLIC_KEY" >&2; exit 1; }; add_peer "$2" "$3" "$4" ;;
 	phone) phone "${2:-}" "${3:-}" ;;
-	*) sed -n '2,12p' "$0"; exit 1 ;;
+	laptop) laptop "${2:-}" "${3:-}" ;;
+	*) sed -n '2,16p' "$0"; exit 1 ;;
 esac

@@ -2,7 +2,8 @@
 # Keep a WireGuard tunnel from the controller to the owner's hub (see wireguard-hub.sh), so the
 # phone can reach the API from anywhere although the carrier puts the controller behind NAT.
 # The tunnel goes out over whichever link is up (Wi-Fi on the bench, cellular in the field) and is
-# kept open with keepalives. Over the tunnel only the API port is reachable, and only from phones.
+# kept open with keepalives. Over the tunnel phones (10.77.0.3-99) reach only the API port and admin
+# laptops (10.77.0.100-149) the API and SSH; nothing else is reachable.
 #
 # Run as root on the Pi:  sudo controller/deploy/wireguard-controller.sh HUB_ADDRESS HUB_PUBLIC_KEY
 # Prints the controller's public key (also kept in /etc/wireguard-controller.pub); add it on the hub with
@@ -21,14 +22,15 @@ command -v nft >/dev/null || { echo "nftables is not installed (apt install nfta
 
 mkdir -p /etc/nftables.d
 cat > "$RULES" <<NFT
-# Solstead: over the tunnel, phones may reach the controller API and nothing else.
+# Solstead: over the tunnel, phones may reach the controller API; admin laptops the API and SSH.
 table inet solstead_tunnel
 delete table inet solstead_tunnel
 table inet solstead_tunnel {
 	chain input {
 		type filter hook input priority -10; policy accept;
 		iifname "wg0" ct state established,related accept
-		iifname "wg0" ip saddr $NET.3-$NET.254 tcp dport $API_PORT accept
+		iifname "wg0" ip saddr $NET.3-$NET.99 tcp dport $API_PORT accept
+		iifname "wg0" ip saddr $NET.100-$NET.149 tcp dport { 22, $API_PORT } accept
 		iifname "wg0" counter drop comment "nothing else over the tunnel"
 	}
 }
@@ -44,6 +46,10 @@ cat > "$CONF" <<CONF
 [Interface]
 Address = $NET.2/24
 PrivateKey = $(cat /etc/wireguard/controller.key)
+# LTE links carry less than 1500 bytes (1460 on Public Mobile), and WireGuard adds 60, so the
+# default 1420 drops every full-size packet over cellular. 1280 also keeps TCP to the API small
+# in both directions.
+MTU = 1280
 
 [Peer]
 PublicKey = $HUB_KEY
