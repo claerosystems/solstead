@@ -161,6 +161,7 @@ struct TimeLapseSettingsSection: View {
 struct TimeLapseSection: View {
     @EnvironmentObject private var model: ControllerModel
     let lapse: TimeLapseStatus
+    @State private var expanded = false
 
     var body: some View {
         Section {
@@ -168,25 +169,31 @@ struct TimeLapseSection: View {
             if let error = lapse.lastError {
                 Text(error).foregroundStyle(.red).font(.callout)
             }
-            ForEach(lapse.days ?? []) { day in
-                Button {
-                    Task { await model.playTimelapse(day) }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(day.date)
-                            Text("\(day.frames) frames, \(ByteCountFormatter.string(fromByteCount: day.bytes, countStyle: .file))")
-                                .font(.caption).foregroundStyle(.secondary)
+            if let days = lapse.days, !days.isEmpty {
+                DisclosureGroup(isExpanded: $expanded) {
+                    ForEach(days) { day in
+                        Button {
+                            Task { await model.playTimelapse(day) }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(day.date)
+                                    Text("\(day.frames) frames, \(ByteCountFormatter.string(fromByteCount: day.bytes, countStyle: .file))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if day.isEncrypted {
+                                    Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                                        .accessibilityLabel("Encrypted")
+                                }
+                                Image(systemName: "play.circle")
+                            }
                         }
-                        Spacer()
-                        if day.isEncrypted {
-                            Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
-                                .accessibilityLabel("Encrypted")
-                        }
-                        Image(systemName: "play.circle")
+                        .foregroundStyle(.primary)
                     }
+                } label: {
+                    Text("Days (\(days.count))")
                 }
-                .foregroundStyle(.primary)
             }
         } header: {
             Text("Time-lapse videos")
@@ -648,24 +655,31 @@ struct LiveView: View {
 
 struct RecordingsSection: View {
     @EnvironmentObject private var model: ControllerModel
+    @State private var expanded = false
 
     var body: some View {
-        Section("Recent recordings") {
+        Section("Manual recordings") {
             if model.recordings.isEmpty {
                 Text("No recordings yet").foregroundStyle(.secondary)
-            }
-            ForEach(model.recordings) { clip in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(clip.created, format: .dateTime.weekday(.wide).month().day().hour().minute())
-                        Text(ByteCountFormatter.string(fromByteCount: clip.sizeBytes, countStyle: .file))
-                            .font(.caption).foregroundStyle(.secondary)
+            } else {
+                LabeledContent("Stored", value: "\(model.recordings.count) recordings, \(ByteCountFormatter.string(fromByteCount: model.recordings.reduce(0) { $0 + $1.sizeBytes }, countStyle: .file))")
+                DisclosureGroup(isExpanded: $expanded) {
+                    ForEach(model.recordings) { clip in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(clip.created, format: .dateTime.weekday(.wide).month().day().hour().minute())
+                                Text(ByteCountFormatter.string(fromByteCount: clip.sizeBytes, countStyle: .file))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if clip.isEncrypted {
+                                Spacer()
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                                    .accessibilityLabel("Encrypted")
+                            }
+                        }
                     }
-                    if clip.isEncrypted {
-                        Spacer()
-                        Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
-                            .accessibilityLabel("Encrypted")
-                    }
+                } label: {
+                    Text("Recordings (\(model.recordings.count))")
                 }
             }
         }
