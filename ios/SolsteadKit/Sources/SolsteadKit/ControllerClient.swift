@@ -50,8 +50,24 @@ public struct ControllerClient: Sendable {
         try decode(ControllerStatus.self, from: await request("v1/status"))
     }
 
-    public func recordings() async throws -> [Recording] {
-        try decode(RecordingList.self, from: await request("v1/recordings")).recordings
+    /// The most a listing returns; asking for this many means "all of them".
+    public static let listingLimit = 100_000
+
+    /// Manual clips, newest first; the controller returns 200 unless `limit` says otherwise.
+    public func recordings(limit: Int? = nil) async throws -> [Recording] {
+        try decode(RecordingList.self, from: await request("v1/recordings" + (limit.map { "?limit=\($0)" } ?? ""))).recordings
+    }
+
+    /// Just the age header of a sealed manual clip, for re-wrapping.
+    public func recordingHeader(_ recording: Recording) async throws -> Data {
+        try await request("v1/recordings/\(recording.id)/header")
+    }
+
+    /// Replaces a sealed manual clip's header with one that adds a recipient; returns the clip.
+    @discardableResult
+    public func replaceRecordingHeader(_ recording: Recording, with header: Data) async throws -> Recording {
+        try decode(Recording.self, from: await request("v1/recordings/\(recording.id)/header", method: "PUT", body: header,
+                                                         contentType: "application/octet-stream"))
     }
 
     /// A JPEG frame. `width` nil uses the controller's preview size; 0 asks for the camera's
@@ -114,7 +130,7 @@ public struct ControllerClient: Sendable {
                           from: await request("v1/timelapse/\(day)/headers", method: "PUT", body: body)).replaced
     }
 
-    /// What restoring access did to one day's sealed frames.
+    /// What restoring access did to a set of sealed recordings (a day's frames, or all event clips).
     public struct RewrapCount: Equatable, Sendable {
         public var unlocked = 0, already = 0, unreadable = 0
         public init() {}

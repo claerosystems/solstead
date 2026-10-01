@@ -8,7 +8,9 @@ import json
 import pytest
 
 from solstead import sealing
+from solstead.events import EventStore
 from solstead.recipients import RecipientsError, RecipientStore, parse
+from solstead.sealed import SealedRecordings
 from tests.conftest import TOKEN
 from tests.test_api import api, call  # noqa: F401  (fixture)
 from tests.test_events import Scenario, make_event
@@ -92,7 +94,7 @@ def record_one(s: Scenario):
 def test_enrolled_recorder_writes_only_sealed_clips_to_the_ssd(tmp_path):
     (device, device_pub), (recovery, recovery_pub) = key(), key()
     keys = [sealing.parse_recipient(device_pub), sealing.parse_recipient(recovery_pub)]
-    s = Scenario(tmp_path, work_folder=tmp_path / "ram", recipients=lambda: keys)
+    s = Scenario(tmp_path, SealedRecordings(lambda: keys, tmp_path / "ram"))
     event = record_one(s)
     assert event.encrypted
     on_ssd = sorted(p.name for p in s.store.folder.iterdir())
@@ -107,7 +109,7 @@ def test_enrolled_recorder_writes_only_sealed_clips_to_the_ssd(tmp_path):
 
 
 def test_unenrolled_recorder_still_records_plain_clips(tmp_path):
-    s = Scenario(tmp_path, work_folder=tmp_path / "ram")
+    s = Scenario(tmp_path, SealedRecordings(list, tmp_path / "ram"))
     event = record_one(s)
     assert not event.encrypted and s.store.clip_path(event).name == event.id + ".mp4"
 
@@ -116,10 +118,10 @@ def test_sealing_failure_is_reported_and_leaves_nothing_behind(tmp_path, monkeyp
     def broken(*_):
         raise OSError("disk full")
 
-    monkeypatch.setattr("solstead.events.seal_file", broken)
+    monkeypatch.setattr("solstead.sealed.seal_file", broken)
     _, public = key()
     keys = [sealing.parse_recipient(public)]
-    s = Scenario(tmp_path, work_folder=tmp_path / "ram", recipients=lambda: keys)
+    s = Scenario(tmp_path, SealedRecordings(lambda: keys, tmp_path / "ram"))
     s.fill_buffer(s.now)
     s.recorder.motion(True, s.now)
     s.advance(10)
@@ -131,21 +133,24 @@ def test_sealing_failure_is_reported_and_leaves_nothing_behind(tmp_path, monkeyp
     assert list((tmp_path / "ram").iterdir()) == []
 
 
-def test_older_plain_clips_are_sealed_one_at_a_time(storage_root):
-    from solstead.events import EventStore
-
-    store = EventStore(storage_root, 10**9)
-    make_event(store, "a", 1000)
-    make_event(store, "b", 2000)
+def test_older_plain_clips_are_sealed_and_the_file_decides(storage_root):
     secret, public = key()
     keys = [sealing.parse_recipient(public)]
-    first = store.seal_next_plain(keys)
-    assert first.encrypted and first.id == "b"
-    assert not store.plain_path("b").exists()
-    assert sealing.open_bytes(store.sealed_path("b").read_bytes(), secret) == b"v" * 100
-    assert store.load("b").encrypted and store.load("b").size_bytes == first.size_bytes
-    assert store.seal_next_plain(keys).id == "a"
-    assert store.seal_next_plain(keys) is None
+    sealed = SealedRecordings(lambda: keys, storage_root / "ram")
+    store = EventStore(storage_root, 10**9, sealed)
+    sealed.add_source(store.plain_clips)
+    make_event(store, "a", 1000)
+    make_event(store, "b", 2000)
+    recorded = (store.folder / "a.json").read_text()
+
+    assert sealed.seal_older(budget_bytes=1) == 1  # oldest first, one clip per budget
+    assert store.load("a").encrypted and not store.load("b").encrypted
+    assert not store.plain_path("a").exists()
+    assert sealing.open_bytes(store.sealed_path("a").read_bytes(), secret) == b"v" * 100
+    assert store.load("a").size_bytes == store.sealed_path("a").stat().st_size
+    assert (store.folder / "a.json").read_text() == recorded  # the JSON is never rewritten
+    assert sealed.seal_older(budget_bytes=1) == 1
+    assert sealed.seal_older(budget_bytes=1) == 0 and not sealed.pending
     assert store.prune() == [] and len(store.events()) == 2
 
 
@@ -181,7 +186,7 @@ def test_enrol_through_the_api_then_older_clips_are_sealed(api):  # noqa: F811
     assert response.status == 200 and body["enrolled"] is True
     assert [r["role"] for r in body["recipients"]] == ["device", "recovery"]
 
-    api.controller._seal_backlog()
+    api.controller.sealed.seal_older()
     assert api.controller.encryption_status()["unencrypted_events"] == 0
     response, clip = call(api, "GET", "/v1/events/20260922T140005-abcdef01/clip")
     assert response.status == 200
@@ -228,7 +233,7 @@ def test_turning_encryption_off_keeps_sealed_clips_and_records_plain(api):  # no
     _, payload = enrolment("device", "recovery")
     put(api, "/v1/encryption", payload)
     make_event(api.controller.store, "20260922T140005-abcdef01", 1790085605, size=10)
-    api.controller._seal_backlog()
+    api.controller.sealed.seal_older()
     response, body = call(api, "DELETE", "/v1/encryption")
     status = json.loads(body)
     assert response.status == 200 and status["enrolled"] is False and status["recipients"] == []
@@ -351,3 +356,28 @@ def test_owner_deletes_plain_and_sealed_events(api):  # noqa: F811
     assert call(api, "DELETE", "/v1/events/x", token="wrong" * 8)[0].status == 401
     logged = api.controller.health.recent(10, "info")
     assert any(e["message"] == "Event deleted by the owner" for e in logged)
+
+
+def test_older_event_clips_are_sealed_while_event_recording_is_off(config, ffmpeg):
+    """Regression: older event clips were only sealed while motion recording was running."""
+    import time
+
+    from solstead.camera import Camera
+    from solstead.controller import Controller
+
+    controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg))
+    assert not config.events_enabled
+    make_event(controller.store, "20260922T140005-abcdef01", 1790085605)
+    (_, recovery), payload = enrolment("device", "recovery")
+    controller.enroll(payload)
+    controller.start()
+    try:
+        deadline = time.time() + 5
+        while controller.encryption_status()["unencrypted_events"] and time.time() < deadline:
+            time.sleep(0.05)
+    finally:
+        controller.stop()
+    assert not controller.events_running
+    assert controller.encryption_status()["unencrypted_events"] == 0
+    sealed = controller.store.sealed_path("20260922T140005-abcdef01").read_bytes()
+    assert sealing.open_bytes(sealed, recovery) == b"v" * 100

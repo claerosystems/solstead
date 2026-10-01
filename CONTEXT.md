@@ -59,7 +59,7 @@ The random secret generated when a controller is provisioned and sent as a beare
 _Avoid_: Password, API key
 
 **Sealed recording**:
-A recording encrypted on the controller to the owner's public keys as it is written, in the age file format. Nothing on the controller can decrypt it; a device key or the recovery key can.
+A recording encrypted on the controller to the owner's public keys as it is written, in the age file format. Nothing on the controller can decrypt it; a device key or the recovery key can. A recording is sealed exactly when its file name ends in `.age`; no separate record says so.
 _Avoid_: Encrypted backup, when meaning footage stored on the controller
 
 **Device key**:
