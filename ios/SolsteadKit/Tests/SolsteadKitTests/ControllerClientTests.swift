@@ -108,6 +108,35 @@ final class ControllerClientTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    func testRecordingDownloadPlainAndSealed() async throws {
+        let plain = try ControllerJSON.decoder.decode(Recording.self, from: Data(
+            #"{"id": "0b6c1f7e-3c2a-4d8e-9f00-1a2b3c4d5e6f.mp4", "size_bytes": 7, "created_unix": 1790085605, "encrypted": false}"#.utf8))
+        transport.responses = [(200, Data("mp4data".utf8))]
+        var url = try await client.downloadRecording(plain)
+        XCTAssertEqual(transport.requests[0].url?.path, "/v1/recordings/\(plain.id)")
+        XCTAssertEqual(url.lastPathComponent, plain.id)
+        XCTAssertEqual(try Data(contentsOf: url), Data("mp4data".utf8))
+        try? FileManager.default.removeItem(at: url)
+
+        // Listed plain, sealed on the controller before it was fetched: decrypted all the same.
+        let identity = AgeIdentity()
+        transport.responses = [(200, try Age.seal(Data("mp4data".utf8), to: [identity.recipient]))]
+        url = try await client.downloadRecording(plain, identities: [identity])
+        XCTAssertEqual(url.lastPathComponent, plain.id)
+        XCTAssertEqual(try Data(contentsOf: url), Data("mp4data".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + ".age"))
+        try? FileManager.default.removeItem(at: url)
+
+        let sealed = try ControllerJSON.decoder.decode(Recording.self, from: Data(
+            #"{"id": "0b6c1f7e-3c2a-4d8e-9f00-1a2b3c4d5e6f.mp4.age", "size_bytes": 7, "created_unix": 1790085605, "encrypted": true}"#.utf8))
+        transport.responses = [(200, Data("sealed".utf8))]
+        do {
+            _ = try await client.downloadRecording(sealed)
+            XCTFail("a sealed recording needs a key")
+        } catch SealingError.noMatchingKey {}
+        XCTAssertEqual(transport.requests[2].url?.path, "/v1/recordings/\(sealed.id)")
+    }
+
     func testLiveStartStopAndResources() async throws {
         transport.responses = [
             (200, Data(#"{"available": true, "active": true, "quality": "high", "ready": true, "playlist": "/v1/live/index.m3u8"}"#.utf8)),

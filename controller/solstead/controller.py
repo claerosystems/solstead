@@ -440,6 +440,9 @@ class Controller:
     def recordings(self) -> list[dict]:
         return self.storage.clips()
 
+    def recording_file(self, recording_id: str) -> Path | None:
+        return self.storage.clip_path(recording_id)
+
     def frame_for_timelapse(self, width: int) -> bytes:
         recent = self._buffered(3 * self.config.segment_seconds + 2)
         if recent:

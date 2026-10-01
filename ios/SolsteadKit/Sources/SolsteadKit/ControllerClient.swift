@@ -193,12 +193,27 @@ public struct ControllerClient: Sendable {
     /// Sealed clips are decrypted on the phone with `identities` and only the plaintext copy is
     /// returned; the sealed download is deleted.
     public func downloadEventClip(_ event: Event, identities: [AgeIdentity] = []) async throws -> URL {
-        let data = try await request("v1/events/\(event.id)/clip")
-        guard event.isEncrypted || Age.isSealed(data.prefix(32)) else {
-            return try writeTemporary(data, name: event.id + ".mp4")
+        try await downloadClip("v1/events/\(event.id)/clip", name: event.id,
+                               encrypted: event.isEncrypted, identities: identities)
+    }
+
+    /// Downloads a manual recording like `downloadEventClip`. A plain recording sealed since it
+    /// was listed arrives sealed and is decrypted too.
+    public func downloadRecording(_ recording: Recording, identities: [AgeIdentity] = []) async throws -> URL {
+        var name = recording.id
+        for suffix in [".age", ".mp4"] where name.hasSuffix(suffix) { name.removeLast(suffix.count) }
+        return try await downloadClip("v1/recordings/\(recording.id)", name: name,
+                                      encrypted: recording.isEncrypted, identities: identities)
+    }
+
+    private func downloadClip(_ path: String, name: String, encrypted: Bool,
+                              identities: [AgeIdentity]) async throws -> URL {
+        let data = try await request(path)
+        guard encrypted || Age.isSealed(data.prefix(32)) else {
+            return try writeTemporary(data, name: name + ".mp4")
         }
         guard !identities.isEmpty else { throw SealingError.noMatchingKey }
-        let sealed = try writeTemporary(data, name: event.id + ".mp4.age")
+        let sealed = try writeTemporary(data, name: name + ".mp4.age")
         defer { try? FileManager.default.removeItem(at: sealed) }
         let plain = sealed.deletingPathExtension()
         try Age.open(fileAt: sealed, to: plain, with: identities)

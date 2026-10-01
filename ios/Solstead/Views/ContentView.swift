@@ -665,22 +665,29 @@ struct RecordingsSection: View {
                 LabeledContent("Stored", value: "\(model.recordings.count) recordings, \(ByteCountFormatter.string(fromByteCount: model.recordings.reduce(0) { $0 + $1.sizeBytes }, countStyle: .file))")
                 DisclosureGroup(isExpanded: $expanded) {
                     ForEach(model.recordings) { clip in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(clip.created, format: .dateTime.weekday(.wide).month().day().hour().minute())
-                                Text(ByteCountFormatter.string(fromByteCount: clip.sizeBytes, countStyle: .file))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            if clip.isEncrypted {
+                        Button {
+                            Task { await model.play(clip) }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(clip.created, format: .dateTime.weekday(.wide).month().day().hour().minute())
+                                    Text(ByteCountFormatter.string(fromByteCount: clip.sizeBytes, countStyle: .file))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 Spacer()
-                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
-                                    .accessibilityLabel("Encrypted")
+                                if clip.isEncrypted {
+                                    Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                                        .accessibilityLabel("Encrypted")
+                                }
+                                Image(systemName: "play.circle")
                             }
                         }
+                        .foregroundStyle(.primary)
                     }
                 } label: {
                     Text("Recordings (\(model.recordings.count))")
                 }
+                .foregroundStyle(.primary)
             }
         }
     }

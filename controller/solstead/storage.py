@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -12,6 +13,7 @@ from .sealing import SUFFIX as SEALED_SUFFIX
 from .sealing import seal_file
 
 MANUAL_FOLDER = "manual"
+CLIP_ID = re.compile(r"[A-Za-z0-9_-]+\.mp4(?:" + re.escape(SEALED_SUFFIX) + ")?")
 
 
 def ram_folder(name: str) -> Path:
@@ -89,6 +91,25 @@ class Storage:
         ]  # fmt: skip
         paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return [self.describe(p) for p in paths[:limit]]
+
+    def clip_path(self, clip_id: str) -> Path | None:
+        """The file behind a listed manual clip id, or None.
+
+        A plain clip sealed after the phone listed it is found under its sealed name, so the
+        phone gets the sealed file (served as-is) rather than a 404.
+        """
+        self.check()
+        if not CLIP_ID.fullmatch(clip_id):
+            return None
+        folder = self.root / MANUAL_FOLDER
+        names = [clip_id]
+        if not clip_id.endswith(SEALED_SUFFIX):
+            names.append(clip_id + SEALED_SUFFIX)
+        for name in names:
+            path = folder / name
+            if path.is_file() and not path.is_symlink():
+                return path
+        return None
 
     def seal_next_plain_clip(self, recipients: list[bytes]) -> str | None:
         """Seal one manual clip recorded before keys were enrolled; None when none are left.

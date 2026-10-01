@@ -214,6 +214,7 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/camera/snapshot[?width=N]` | One JPEG frame (`image/jpeg`) at `snapshot_width` by default; `width=0` returns the camera's full resolution, taken from the buffer. |
 | `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix, encrypted}, …]}`, newest first, up to 200. |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD (sealed as `<id>.mp4.age` when keys are enrolled); returns its entry with status 201. |
+| `GET /v1/recordings/{id}` | The recording's MP4 (`video/mp4`), or when sealed the age file as-is (`application/octet-stream`) for the phone to decrypt, with `Range` support. A plain `{id}` sealed since it was listed returns the sealed file. `HEAD` works too. |
 | `GET /v1/events[?limit=N]` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
 | `DELETE /v1/events/{id}` | The owner deletes an event: clip and record are removed and the deletion is logged. 404 if unknown. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |

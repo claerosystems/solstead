@@ -149,6 +149,11 @@ def test_enrolment_seals_older_frames_and_clips_and_drops_plain_exports(api):  #
     assert listed[0]["created_unix"] == clip["created_unix"]
     manual = controller.config.storage_path / "manual" / listed[0]["id"]
     assert sealing.open_bytes(manual.read_bytes(), device).startswith(b"\x00\x00\x00\x1cftyp")
+    for listed_id in (listed[0]["id"], clip["id"]):  # the id the phone listed before sealing too
+        response, body = call(api, "GET", f"/v1/recordings/{listed_id}")
+        assert response.status == 200
+        assert response.getheader("Content-Type") == "application/octet-stream"
+        assert body == manual.read_bytes()  # served as-is; the phone decrypts
     assert controller._backlog is True
     controller._seal_older_frames_and_clips()
     assert controller._backlog is False  # nothing left: stop scanning every tick

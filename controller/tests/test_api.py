@@ -70,6 +70,43 @@ def test_record_then_list(api):
     assert response.status == 200 and json.loads(body)["recordings"][0]["id"] == clip["id"]
 
 
+def test_recording_file_with_ranges(api):
+    clip = json.loads(call(api, "POST", "/v1/recordings")[1])
+    path = api.controller.config.storage_path / "manual" / clip["id"]
+    response, body = call(api, "GET", f"/v1/recordings/{clip['id']}")
+    assert response.status == 200 and response.getheader("Content-Type") == "video/mp4"
+    assert response.getheader("Accept-Ranges") == "bytes" and body == path.read_bytes()
+
+    conn = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=5)
+    conn.request(
+        "GET",
+        f"/v1/recordings/{clip['id']}",
+        headers={"Authorization": "Bearer " + TOKEN, "Range": "bytes=0-3"},
+    )
+    response = conn.getresponse()
+    assert response.status == 206 and response.read() == path.read_bytes()[:4]
+    conn.close()
+
+
+def test_recording_file_refuses_unknown_and_unsafe_ids(api, config):
+    folder = config.storage_path / "manual"
+    folder.mkdir()
+    (folder / "x.mp4.partial").write_bytes(b"half")
+    (config.storage_path / "secret.mp4").write_bytes(b"outside")
+    (folder / "link.mp4").symlink_to(config.storage_path / "secret.mp4")
+    for path in (
+        "/v1/recordings/missing.mp4",
+        "/v1/recordings/x.mp4.partial",
+        "/v1/recordings/link.mp4",
+        "/v1/recordings/..%2Fsecret.mp4",
+        "/v1/recordings/../secret.mp4",
+        "/v1/recordings/notes.txt",
+    ):
+        response, _ = call(api, "GET", path)
+        assert response.status == 404, path
+    assert call(api, "GET", "/v1/recordings/x.mp4", token=None)[0].status == 401
+
+
 def test_unknown_route(api):
     response, _ = call(api, "GET", "/v1/nope")
     assert response.status == 404
