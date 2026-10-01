@@ -42,6 +42,10 @@ _Avoid_: Download, which is fetching footage into the app to watch it
 An event recording the owner has selected to retain outside automatic overwrite, subject to the system's limited protected-storage allocation.
 _Avoid_: Backup, permanent recording
 
+**Manual recording**:
+A recording the owner starts on demand, rather than one triggered by detected activity or captured on the time-lapse schedule.
+_Avoid_: Recent recording, clip (an event's footage is also a clip)
+
 **Weather-resistant assembly**:
 The installed system with connected cables, capped unused ports, and closed service covers, intended to withstand outdoor rain, snow, dust, and hose spray. Submersion is outside its launch exposure scope.
 _Avoid_: Waterproof, without a defined exposure or test rating

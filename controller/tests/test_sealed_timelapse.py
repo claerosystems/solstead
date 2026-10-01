@@ -152,6 +152,11 @@ def test_enrolment_seals_older_frames_and_clips_and_drops_plain_exports(api):  #
     assert listed[0]["created_unix"] == clip["created_unix"]
     manual = controller.config.storage_path / "manual" / listed[0]["id"]
     assert sealing.open_bytes(manual.read_bytes(), device).startswith(b"\x00\x00\x00\x1cftyp")
+    for listed_id in (listed[0]["id"], clip["id"]):  # the id the phone listed before sealing too
+        response, body = call(api, "GET", f"/v1/recordings/{listed_id}")
+        assert response.status == 200
+        assert response.getheader("Content-Type") == "application/octet-stream"
+        assert body == manual.read_bytes()  # served as-is; the phone decrypts
     assert controller.sealed.pending is False  # nothing left: stop scanning every tick
 
     response, body = call(api, "GET", "/v1/timelapse/2026-09-22/video.mp4")
@@ -273,5 +278,7 @@ def test_new_phone_rewraps_an_older_manual_clips_header(api):  # noqa: F811
     assert put_raw(api, path, only_new)[0].status == 400  # would drop keys
     assert put_raw(api, path, b"")[0].status == 400
     plain_id = clip["id"].removesuffix(".age")
-    assert call(api, "GET", f"/v1/recordings/{plain_id}/header")[0].status == 404
+    # An id listed before the clip was sealed still finds it, as GET /v1/recordings/{id} does.
+    assert call(api, "GET", f"/v1/recordings/{plain_id}/header")[0].status == 200
+    assert call(api, "GET", "/v1/recordings/missing.mp4.age/header")[0].status == 404
     assert call(api, "GET", "/v1/recordings/..%2Fx.mp4.age/header")[0].status == 404

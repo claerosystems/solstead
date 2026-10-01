@@ -25,6 +25,7 @@ CHUNK = 256 * 1024
 EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
 EVENT = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)$")
 EVENT_HEADER = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/header$")
+RECORDING = re.compile(r"^/v1/recordings/([A-Za-z0-9._-]+)$")
 RECORDING_HEADER = re.compile(r"^/v1/recordings/([A-Za-z0-9._-]+)/header$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
 TIMELAPSE_DAY = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})$")
@@ -150,6 +151,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {"recordings": controller.recordings(limit)})
             if self.command == "POST" and path == "/v1/recordings":
                 return self.reply(201, controller.record())
+            recording = RECORDING.match(path)
+            if get and recording:
+                found = controller.recording_file(recording.group(1))
+                if not found:
+                    return self.reply(404, {"error": "Recording not found"})
+                return self.send_file(found, SEALED if found.suffix == ".age" else "video/mp4")
             if get and path == "/v1/events":
                 limit = min(max(int(query.get("limit", "200") or 200), 1), 100000)
                 return self.reply(200, {"events": controller.events(limit)})

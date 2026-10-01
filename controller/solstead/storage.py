@@ -13,7 +13,7 @@ from .sealed import is_sealed
 from .sealing import SUFFIX as SEALED_SUFFIX
 
 MANUAL_FOLDER = "manual"
-CLIP_NAME = re.compile(r"^[0-9a-f-]{36}\.mp4(\.age)?$")
+CLIP_ID = re.compile(r"[A-Za-z0-9_-]+\.mp4(?:" + re.escape(SEALED_SUFFIX) + ")?")
 
 
 def ram_folder(name: str) -> Path:
@@ -62,13 +62,6 @@ class Storage:
         folder.mkdir(exist_ok=True)
         return folder / (str(uuid.uuid4()) + ".mp4")
 
-    def clip_path(self, clip_id: str) -> Path | None:
-        """The manual clip called clip_id (<uuid>.mp4 or <uuid>.mp4.age), if it exists."""
-        if not CLIP_NAME.match(clip_id):
-            return None
-        path = self.root / MANUAL_FOLDER / clip_id
-        return path if path.is_file() and not path.is_symlink() else None
-
     @staticmethod
     def describe(path: Path) -> dict:
         stat = path.stat()
@@ -90,6 +83,25 @@ class Storage:
         ]  # fmt: skip
         paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return [self.describe(p) for p in paths[:limit]]
+
+    def clip_path(self, clip_id: str) -> Path | None:
+        """The file behind a listed manual clip id, or None.
+
+        A plain clip sealed after the phone listed it is found under its sealed name, so the
+        phone gets the sealed file (served as-is) rather than a 404.
+        """
+        self.check()
+        if not CLIP_ID.fullmatch(clip_id):
+            return None
+        folder = self.root / MANUAL_FOLDER
+        names = [clip_id]
+        if not clip_id.endswith(SEALED_SUFFIX):
+            names.append(clip_id + SEALED_SUFFIX)
+        for name in names:
+            path = folder / name
+            if path.is_file() and not path.is_symlink():
+                return path
+        return None
 
     def plain_clips(self) -> list[Path]:
         """Manual clips recorded before keys were enrolled, oldest first."""

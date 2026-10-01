@@ -157,6 +157,18 @@ final class ControllerModel: ObservableObject {
         }
     }
 
+    func play(_ recording: Recording) async {
+        await perform {
+            message = "Downloading \(ByteCountFormatter.string(fromByteCount: recording.sizeBytes, countStyle: .file)) recording…"
+            let url = try await connected().downloadRecording(recording, identities: [DeviceKeyStore.load()].compactMap { $0 })
+            playingClip = try PlayableClip(
+                title: recording.created.formatted(date: .abbreviated, time: .shortened), downloaded: url,
+                exportName: "Solstead recording \(PlayableClip.fileStamp.string(from: recording.created))",
+                recorded: recording.created)
+            message = "Playing recording from \(recording.created.formatted(date: .abbreviated, time: .shortened))."
+        }
+    }
+
     /// Deletes an event from the controller. Copies already exported are not affected.
     func delete(_ event: Event) async {
         await perform {
