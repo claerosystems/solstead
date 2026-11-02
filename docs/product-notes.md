@@ -295,3 +295,10 @@ The user has four MK 12 V 18 Ah/20 h SLAs (the bench battery's model) and asked 
 - **Cold:** SLA capacity at −20 °C is roughly 50–60% of rated, and a lead-acid battery near half charge can freeze around −24 °C, so the load disconnect must not be lowered for a cold test. The bank weighs about 22 kg.
 
 The terminal type (bolt or spade) and the AGM/gel subtype are still to be confirmed. Busbars, fuses and cable are not purchased.
+
+A photo of one battery's label (2026-11-02) settles most of this:
+
+- **Terminals:** flat tabs with a hole, taking a nut and bolt (one bolt was fitted on the negative tab; the positive tab's was missing). Leads use ring terminals sized to the bolt, roughly M5 or M6 (to be measured).
+- **Charging, as printed (5–35 °C):** standby 13.5–13.8 V, cycle use 14.4–15.0 V, current at most 0.3C, which is 5.4 A per battery and 21.6 A for the bank, above the 75/15's 15 A.
+- **Subtype:** the label says only "non-spillable sealed lead-acid". A 14.4–15.0 V cycle range suits AGM and would overcharge gel, so the battery is treated as AGM. The Victron's default preset (14.4 V absorption, 13.8 V float) sits at the bottom of the printed cycle range and inside the standby range, so it is used unchanged, with the default temperature compensation, which raises the voltage when charging below 5 °C.
+- **Age:** the ship-code sticker reads A-22 / 7-22, labelled "recharge before", so the battery was made around early 2022 and is about four and a half years old, near the end of a typical 3–5 year service life for a small sealed battery. Read the code on the other three batteries, and confirm capacity before relying on the bank: after a full charge and a day's rest, a healthy battery reads about 12.8 V or more; for a capacity figure, run the system from one battery and log the amp-hours delivered down to the 11.8 V disconnect through the Victron's load output and the telemetry reader.
