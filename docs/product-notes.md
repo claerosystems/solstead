@@ -273,3 +273,14 @@ The user set C$500 for everything, asked for a smaller, lower-power system, and 
 ## Solar test with the current system — 2026-11-01
 
 The user deferred [the low-power redesign](low-power-redesign.md), keeping it as written, and chose to buy a solar panel now and test with the equipment already in use: S445, Pi 4, SIM7600, the converters and the 18 Ah SLA bench battery. The panel follows [the winter test solar panel spec](winter-test-solar-panel-spec.md): ECO-WORTHY 2 × 100 W bifacial (Amazon.ca B0B3RW7HC9, C$189.99), wired in series. One 100 W panel can later serve the low-power design. The charge controller is still to be confirmed, whether the Victron 75/15 or another. With the SLA, the charger needs the lead-acid profile matching the battery's subtype (AGM or gel, still unconfirmed) and temperature compensation on. The SLA holds about 216 Wh nominal, roughly 8 hours of a 13 W load at 50% depth of discharge, so this test measures solar harvest and system draw, not winter autonomy. Not purchased.
+
+The user has the Victron SmartSolar MPPT 75/15, so it is the charge controller for this test. Setup:
+
+- **Panel wiring:** the two ECO-WORTHY panels in series (about 44 V open-circuit, about 51 V at -30 °C, within the 75 V limit). A single series string needs no panel fuse. A DC isolator between the panel and the charger lets the panel be disconnected safely.
+- **Connection order:** connect the battery to the Victron first, then the panel. Disconnect in reverse: panel first, then battery.
+- **Battery side:** a 20 A fuse in the positive lead, close to the SLA.
+- **Charge profile:** the built-in preset matching the SLA's subtype (AGM or gel, still unconfirmed), with temperature compensation on (the Victron's internal sensor).
+- **Load output:** camera and Pi converters on the load output, as planned for telemetry, so system use is measured. For an 18 Ah SLA, set a user-defined disconnect of about 11.8 V and reconnect at 12.8 V, adjusted once the voltage sag under the S445's infrared load has been measured.
+- **Cable:** 10 AWG solar extension with MC4 connectors (an iGreely 20 ft cable was C$44.99 on Amazon.ca on 2026-11-01).
+
+Telemetry stage 3, the Victron Bluetooth reader, was blocked only on having the charger, so it can now go ahead and log this test.
