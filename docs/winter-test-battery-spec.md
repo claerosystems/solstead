@@ -126,6 +126,24 @@ The camera adds nothing to either (already owned). Foam: two 50 mm sheets of XPS
 
 Rejected at this price: ECO-WORTHY 12V 100Ah (C$299.99) and DC HOUSE 12V 100Ah (C$279.99), whose listings say charging stops only below -7 °C. That allows charging between -7 and 0 °C, which damages lithium cells. Over budget: LiTime 12V 100Ah Bluetooth with 0 °C cutoff, C$379.99 before the heater parts.
 
+### Chosen: combination A — 2026-11-01
+
+The user chose combination A, the Dumfume 100 Ah, as the cheapest option. Not yet ordered. Shopping list (Amazon.ca, prices as seen on 2026-11-01):
+
+| Item | Listing | Price |
+|---|---|---:|
+| Dumfume 12V 100Ah LiFePO4, 100A BMS, low-temperature cutoff | [B0DLGKGM7P](https://www.amazon.ca/dp/B0DLGKGM7P) | C$239.99 |
+| MECCANIXITY 12 V 20 W silicone heating pad, 150 × 50 mm | [B0FBGFYQBC](https://www.amazon.ca/dp/B0FBGFYQBC) | C$19.39 |
+| W1209 12 V digital thermostat | [B099KMMJ5F](https://www.amazon.ca/dp/B099KMMJ5F) | C$13.99 |
+| Two 50 mm XPS sheets | Hardware store | not checked |
+
+Before the battery goes into the enclosure:
+
+1. Confirm on the label or with the seller the charge cutoff temperature, the discharge cutoff, and how the BMS recovers from a low-voltage cutoff (requirement 7). Return it if charging continues below 0 °C.
+2. Freezer test: with the battery probe taped to the case, cool the battery below 0 °C and check that the Victron shows no charge current going in, while the battery still powers a load.
+3. Run the 48-hour load measurement on the Victron's load output with the S445's white LEDs off. Continue with 100 Ah only if the average, plus about 3 W for the pad, is under about 13 W.
+4. Set the W1209 to switch on below +3 °C and off at +8 °C, and fuse the pad separately on the load output.
+
 ### What this costs in capability
 
 - Three-day autonomy at 100 Ah holds only if the measured load, heater included, is under about 13 W. The 48-hour measurement decides it before buying.

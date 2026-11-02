@@ -259,3 +259,5 @@ The user asked for a lithium battery for the first winter test. Drafted in [the 
 ## Budget winter battery under C$400 — 2026-11-01
 
 The user found the self-heating shortlist too expensive and set C$400 for camera and battery together. The new direction, in [the winter test battery spec](winter-test-battery-spec.md#budget-option-under-c400--2026-11-01): keep the S445 (owned; lower-power VIGI models cost more than it did) with white LEDs off, and use an ordinary 100 Ah LiFePO4 with a 0 °C charge cutoff. It goes inside the controller enclosure with 100 mm of XPS, warmed by the controller's 5–8 W of waste heat, plus a thermostat-switched 20 W pad for the coldest weather. About C$273 (Dumfume) or C$385 (Renogy Core Mini) before foam. This holds three days only if the measured load, heater included, is under about 13 W. Not purchased.
+
+The user chose the Dumfume 12V 100Ah (C$239.99) with a 20 W pad and W1209 thermostat, about C$273 before foam. Not yet ordered. The spec lists the checks before use: confirm the charge cutoff and BMS recovery, freezer-test the cutoff, and measure the load for 48 hours.
