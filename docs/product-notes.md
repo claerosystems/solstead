@@ -255,3 +255,7 @@ This is a bench arrangement, not a product decision. Requiring customers to run 
 ## Winter test battery specified — 2026-11-01
 
 The user asked for a lithium battery for the first winter test. Drafted in [the winter test battery specification](winter-test-battery-spec.md): 12.8 V LiFePO4, 200 Ah unless a measured load comes in under about 11 W, charging blocked below 0 °C cell temperature, and a self-heater that starts at the 3–4 A a small December panel gives. The Victron's own low-temperature cut-off stays off and its load disconnect sits above the BMS cutoff. No product selected, and the load is still unmeasured.
+
+## Budget winter battery under C$400 — 2026-11-01
+
+The user found the self-heating shortlist too expensive and set C$400 for camera and battery together. The new direction, in [the winter test battery spec](winter-test-battery-spec.md#budget-option-under-c400--2026-11-01): keep the S445 (owned; lower-power VIGI models cost more than it did) with white LEDs off, and use an ordinary 100 Ah LiFePO4 with a 0 °C charge cutoff. It goes inside the controller enclosure with 100 mm of XPS, warmed by the controller's 5–8 W of waste heat, plus a thermostat-switched 20 W pad for the coldest weather. About C$273 (Dumfume) or C$385 (Renogy Core Mini) before foam. This holds three days only if the measured load, heater included, is under about 13 W. Not purchased.

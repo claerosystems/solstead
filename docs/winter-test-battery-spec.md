@@ -2,6 +2,8 @@
 
 Draft, 2026-11-01, for the first Huntsville winter test. This is a requirements specification, not a purchase recommendation: no product is selected, and capacity depends on a load measurement that has not been made.
 
+The user found the self-heating shortlist below too expensive and set a C$400 ceiling for camera and battery together. The [budget option](#budget-option-under-c400--2026-11-01) at the end supersedes that shortlist as the current direction: it keeps the S445 and warms an ordinary battery with the controller's own heat.
+
 ## What the battery has to do
 
 - Run the one-camera system (VIGI S445, Raspberry Pi 4 controller with SSD, SIM7600G-H modem, DROK 12 V and 5 V converters) for three days at -20 °C with no solar input, the accepted autonomy target in the [feasibility review](feasibility-review.md).
@@ -97,3 +99,36 @@ A battery without a heater (a 12V 200Ah with low-temperature cutoff is C$454.89 
 For a 200 Ah test, the Volthium is the one candidate whose heating does not depend on the panel. It needs a controller-switched heater relay and its fail-safe, which is new work for the controller. If that work should wait, the Renogy Pro 200Ah at about C$1,020 is the off-the-shelf choice: the winter test will then measure how often the heater cannot start. Both are well over the C$500 energy and thermal envelope in the feasibility review, so this is a test purchase, not a production direction. Before ordering the Volthium, get from Volthium the auto-heating activation current, the H+ heater current, and the storage rating for this model.
 
 Sources: [Volthium 12V 200Ah self-heating](https://volthium.com/en/produit/12v-200ah-self-heating-battery/), [Volthium 12V 150Ah technical sheet](https://www.solacity.com/docs/Volthium/ENG-Technical-sheet-12V-150AH-2023-G31.pdf), [Victron community report on Volthium heating current](https://community.victronenergy.com/t/self-heating-battery-vs-multiplus-ii/48356), [Renogy Pro 12V 200Ah (Canada)](https://ca.renogy.com/products/pro-12v-200ah-smart-lithium-iron-phosphate-battery-w-bluetooth-self-heating), [Renogy Reserve Mini Smart 200Ah](https://ca.renogy.com/products/reserve-mini-smart-12v-200ah-314ah-lifepo4-battery-with-self-heating-bluetooth), [Renogy Core Mini DuoHeat](https://ca.renogy.com/products/core-mini-12v-100ah-lifepo4-battery-with-duoheat-tech), [Battle Born BB10012 data sheet](https://battlebornbatteries.com/cdn/shop/files/BB10012_Data_Sheet.pdf), [How Battle Born heated batteries work](https://battlebornbatteries.com/blogs/academy/how-battle-born-heated-batteries-work-the-battle-born-educational-series), [Battle Born BB10012H at Volts.ca](https://volts.ca/products/battleborn-100ah-12v-lifepo4-deep-cycle-heated-battery), [LiTime 12V 200Ah Plus (Canada)](https://ca.litime.com/products/12v-200ah-plus-self-heating-lifepo4-battery), [LiTime 12V 100Ah Group 24 self-heating (Canada)](https://ca.litime.com/products/12v-100ah-group-24-lithium-self-heating-battery), [LiTime 12V 320Ah Mini, heating modes FAQ](https://ca.litime.com/products/litime-12v-320ah-mini-smart-self-heating-lithium-battery), Amazon.ca listings B0CM9FBCBW, B0DJ957H39, B0GR91NDH5, B0CHDTYXBW, B0DLGPVF4Z, [Power Queen 100Ah self-heating](https://ipowerqueen.com/products/products-power-queen-12v-100ah-self-heating-lifepo4-battery), [Redodo 100Ah self-heating](https://www.redodopower.com/products/self-heating-redodo-12v-100ah-lithium-battery).
+
+## Budget option under C$400 — 2026-11-01
+
+The user set a C$400 ceiling for the camera and battery together. Two findings shape it.
+
+**Keep the S445.** It is already bought. The VIGI models with lower published maximums cost more on Amazon.ca than the S445 did (C240 C$202.90, C340 C$209.70, C440 C$243.70), so a camera swap would use half the budget to save a few watts that have not been measured. Saving camera power is a settings job: infrared only, with the S445's white LEDs set to always off (the camera offers Auto, Scheduled, Always on and Always off), and confirmed with the 48-hour load measurement.
+
+**Warm the battery with heat the system already makes.** The Pi, SSD, modem and converter losses turn about 5–8 W into heat in the controller enclosure. Put the battery in the same box, inside 100 mm of XPS foam board (two 50 mm layers), and that heat keeps the battery warm without a self-heating battery:
+
+- A box about 45 × 30 × 35 cm inside has about 0.8 m² of surface. At 100 mm of XPS (about RSI 3.5), that conducts about 0.23 W/K. Allowing 50% extra for the lid seam, cable entries and corners gives about 0.35 W/K.
+- 6 W of controller heat then holds the inside about 17 °C above outside. The battery stays above 0 °C, and so can charge, down to about -15 °C outside. Its 10–11 kg also smooths out overnight drops.
+- Colder than that, a 12 V, 20 W silicone heating pad under the battery, switched by a W1209 thermostat (on below +3 °C, off at +8 °C), makes up the difference. Holding +3 °C at -25 °C outside takes about 9 W in total, so about 3 W average from the pad, and only in the coldest weather. Wire the pad through its own fuse on the Victron's load output so telemetry counts its energy.
+- A warm battery also delivers more of its rated capacity than the 60% assumed above for a cold one. At 75% usable, a 100 Ah battery gives about 960 Wh, which covers 72 hours at up to about 13 W, including any heater energy.
+
+This replaces requirement 4 (self-heating) with a battery that has an ordinary 0 °C charge cutoff, and changes the capacity requirement to 100 Ah if the measured load, heater included, is under about 13 W.
+
+### Combinations
+
+| | Battery | Heater and control | Total before foam | Note |
+|---|---|---|---:|---|
+| **A, in budget** | Dumfume 12V 100Ah, Amazon.ca B0DLGKGM7P, C$239.99, sold and shipped by Dumfume-CA; listed with a low-temperature cutoff | 12 V 20 W pad (B0FBGFYQBC, C$19.39) + W1209 thermostat (B099KMMJ5F, C$13.99) | **C$273.37** | Lesser-known brand. Its listing says "Low Temp Cutoff" but gives no temperature for the 100 Ah model; the brand's 200 Ah listing stops charging below 0 °C and discharges to -20 °C. Check the cutoff with the battery probe in a freezer before relying on it. |
+| **B, known brand** | Renogy Core Mini 12V 100Ah, Amazon.ca B0DLBFWY41, C$351.99, shipped and sold by Renogy; blocks charging below 0 °C | Same pad and thermostat | **C$385.37** | About C$400–425 once the foam is added. |
+
+The camera adds nothing to either (already owned). Foam: two 50 mm sheets of XPS from a hardware store, price not checked. Fuses, wire and the DS18B20 probes are already on the bench list.
+
+Rejected at this price: ECO-WORTHY 12V 100Ah (C$299.99) and DC HOUSE 12V 100Ah (C$279.99), whose listings say charging stops only below -7 °C. That allows charging between -7 and 0 °C, which damages lithium cells. Over budget: LiTime 12V 100Ah Bluetooth with 0 °C cutoff, C$379.99 before the heater parts.
+
+### What this costs in capability
+
+- Three-day autonomy at 100 Ah holds only if the measured load, heater included, is under about 13 W. The 48-hour measurement decides it before buying.
+- If the thermostat or pad fails, the battery still discharges normally to -20 °C. It just can't charge until it warms up. That is the same failure as a self-heating battery whose heater never gets enough current, but cheaper.
+- The pad heats from the battery at night as well as by day. A later controller version could heat only when the Victron reports solar power, which saves battery energy. The thermostat stays as the hardware fail-safe.
+- Insulation that holds 17 °C in winter will overheat the Pi in summer. That is a design question for after the winter test.
