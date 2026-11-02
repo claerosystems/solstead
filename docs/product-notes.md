@@ -265,3 +265,7 @@ The user chose the Dumfume 12V 100Ah (C$239.99) with a 20 W pad and W1209 thermo
 ## Winter test solar panel drafted — 2026-11-01
 
 No panel had been specified. Drafted in [the winter test solar panel spec](winter-test-solar-panel-spec.md): about 200 W in about 1 m², at a 75° tilt (same December yield as 60°, sheds snow better), two 12 V panels in series on the 75/15. Recommended: ECO-WORTHY 2 × 100 W bifacial, C$189.99. At a 13 W load this only breaks even on an average December day. The three-day winter recovery target needs about 390 W, which the size limit and the 75/15 rule out unless the measured load is under about 6.7 W. Not purchased.
+
+## Low-power redesign proposed — 2026-11-01
+
+The user set C$500 for everything, asked for a smaller, lower-power system, and allowed a camera change and less range. Proposed in [the low-power redesign](low-power-redesign.md), pending acceptance: one box with a Pi Zero 2 W and a Camera Module 3 NoIR (estimated 2.7–3.7 W in total, against about 13 W now), a 30 Ah battery, a 100 W panel, a solar-only battery heater, and a controller-enforced cold charge cutoff. It comes to about C$599 with a new Cat-1 modem, about C$524 using the owned SIM7600, and about C$481 if autonomy also drops to two days on a 20 Ah battery. Requirement changes proposed: identification at about 5 m instead of 20 m, the camera inside the controller box, recordings on a partition of the one microSD card, 1080p at 15 fps. The power figures are estimates; measure a Zero 2 W and camera on the bench before buying the rest.
