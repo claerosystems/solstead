@@ -1,6 +1,6 @@
 # Low-power redesign under C$500
 
-Proposal, 2026-11-01, pending the user's acceptance. It supersedes the battery and panel choices in the [winter test battery spec](winter-test-battery-spec.md) and [winter test solar panel spec](winter-test-solar-panel-spec.md) if accepted.
+Proposal, 2026-11-01. **Deferred:** the user chose to keep it as written for later and to test the current system with a solar panel first. Pending the user's acceptance. It supersedes the battery and panel choices in the [winter test battery spec](winter-test-battery-spec.md) and [winter test solar panel spec](winter-test-solar-panel-spec.md) if accepted.
 
 The user asked for a total price under C$500 for everything, a smaller system, and lower power, and allowed a camera change and a shorter range. This reads "everything" as every part of the winter test system, priced at Canadian retail. It is not the C$250 landed production cost, which retail parts can't reach.
 
