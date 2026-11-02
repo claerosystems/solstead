@@ -284,3 +284,14 @@ The user has the Victron SmartSolar MPPT 75/15, so it is the charge controller f
 - **Cable:** 10 AWG solar extension with MC4 connectors (an iGreely 20 ft cable was C$44.99 on Amazon.ca on 2026-11-01).
 
 Telemetry stage 3, the Victron Bluetooth reader, was blocked only on having the charger, so it can now go ahead and log this test.
+
+## Four-battery SLA bank for the solar test — 2026-11-02
+
+The user has four MK 12 V 18 Ah/20 h SLAs (the bench battery's model) and asked to use them together for this test. Wired in parallel they make a 12 V, 72 Ah bank: about 864 Wh nominal, roughly 33 hours of a 13 W load at 50% depth of discharge. That is still short of three days, so the test still measures solar harvest and system draw, but it runs through a night and a dull day. Series wiring (24 V or 48 V) is ruled out because the camera and Pi converters need 12 V.
+
+- **Before joining them:** charge each battery fully on its own (MotoMaster fixed 2 A, or the G750), rest a few hours, and check resting voltages agree within about 0.1 V. Leave out any battery that reads low or does not hold charge. Ages are unknown; watch any battery that is much older than the others.
+- **Bank wiring, preferred:** positive and negative busbars, each battery joined to them by its own equal-length 10 AWG pair, with a 20 A fuse in each battery's positive lead close to the battery so one shorted battery cannot draw on the other three. The cheaper alternative is equal-length 10 AWG jumpers (+ to +, − to −) with the bank taken from battery 1's positive and battery 4's negative, so the batteries share current evenly; it has no per-battery fuses.
+- **Victron:** battery terminals to the busbars (or battery 1 + and battery 4 −), keeping the 20 A fuse near the bank and the battery-first connection order. The 75/15's 15 A maximum is about 0.2C for 72 Ah. The charge profile and temperature compensation are unchanged; the charger's internal sensor stands in for battery temperature only if the charger and bank share the enclosure. The 11.8 V load disconnect and 12.8 V reconnect stay until the sag under the S445's infrared load is measured on the larger bank.
+- **Cold:** SLA capacity at −20 °C is roughly 50–60% of rated, and a lead-acid battery near half charge can freeze around −24 °C, so the load disconnect must not be lowered for a cold test. The bank weighs about 22 kg.
+
+The terminal type (bolt or spade) and the AGM/gel subtype are still to be confirmed. Busbars, fuses and cable are not purchased.
