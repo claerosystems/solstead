@@ -16,15 +16,15 @@
   svg { width: 100%; flex: 1; }
   h2 { font-size: 11pt; margin: 0 0 5px; color: #1a5fa8; text-transform: uppercase; letter-spacing: 0.6px; }
   .cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px; flex: 1; }
-  table { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin-bottom: 12px; }
-  th { text-align: left; background: #eef2f7; color: #1d2430; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #c9d2de; }
-  td { padding: 3.5px 6px; border-bottom: 1px solid #e3e8ef; vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 9px; }
+  th { text-align: left; background: #eef2f7; color: #1d2430; font-weight: 600; padding: 3px 6px; border-bottom: 1px solid #c9d2de; }
+  td { padding: 2.4px 6px; border-bottom: 1px solid #e3e8ef; vertical-align: top; }
   td:first-child { font-weight: 600; white-space: nowrap; }
   td:last-child:not(:nth-child(2)) { white-space: nowrap; }
-  .cols { min-height: 0; }
-  ol, ul { margin: 0 0 12px; padding-left: 18px; font-size: 8.8pt; line-height: 1.38; }
+  .cols { min-height: 0; overflow: hidden; }
+  ol, ul { margin: 0 0 9px; padding-left: 18px; font-size: 8.3pt; line-height: 1.32; }
   li { margin-bottom: 2px; }
-  .warn { background: #fff4e8; border-left: 4px solid #e8822a; padding: 7px 10px; font-size: 8.6pt; line-height: 1.38; margin-bottom: 10px; }
+  .warn { background: #fff4e8; border-left: 4px solid #e8822a; padding: 5px 9px; font-size: 8.1pt; line-height: 1.32; margin-bottom: 7px; }
   .warn b { color: #b85d12; }
   footer { font-size: 7.5pt; color: #8a93a3; border-top: 1px solid #d5dbe4; padding-top: 4px; margin-top: 4px; }
 </style>
@@ -54,6 +54,7 @@
       .negl { stroke: #1d2430; stroke-width: 2.2; fill: none; stroke-linejoin: round; }
       .usb { stroke: #7b3fb5; stroke-width: 2.6; fill: none; }
       .eth { stroke: #1e9b5a; stroke-width: 2.4; fill: none; stroke-dasharray: 7 4; }
+      .poe { stroke: #0f6e3d; stroke-width: 4.5; fill: none; }
       .bt { stroke: #2f7fd6; stroke-width: 2; fill: none; stroke-dasharray: 2 4; stroke-linecap: round; }
       .box { fill: #ffffff; stroke: #5a6475; stroke-width: 1.4; }
       .title { font-size: 12.5px; font-weight: 700; fill: #1d2430; }
@@ -194,23 +195,31 @@
     <text x="683" y="318" text-anchor="middle" class="tiny">with − bus</text>
 
     <!-- Branch A: to DROK (up) -->
-    <path class="posl" d="M 716 214 L 728 214 L 728 64 L 752 64"/>
-    <path class="negl" d="M 716 224 L 736 224 L 736 76 L 752 76"/>
-    <rect x="752" y="40" width="108" height="64" rx="6" class="box"/>
-    <text x="806" y="61" text-anchor="middle" class="title" font-size="11.5">DROK 12 V / 5 A</text>
-    <text x="806" y="75" text-anchor="middle" class="sub">regulated converter</text>
-    <text x="806" y="88" text-anchor="middle" class="sub">set to 12.0 V</text>
-    <text x="724" y="150" text-anchor="end" class="tiny">16 AWG</text>
+    <path class="posl" d="M 716 214 L 728 214 L 728 128 L 752 128"/>
+    <path class="negl" d="M 716 224 L 736 224 L 736 140 L 752 140"/>
+    <rect x="752" y="106" width="108" height="62" rx="6" class="box"/>
+    <text x="806" y="126" text-anchor="middle" class="title" font-size="11.5">DROK 12 V / 5 A</text>
+    <text x="806" y="140" text-anchor="middle" class="sub">regulated converter</text>
+    <text x="806" y="153" text-anchor="middle" class="sub">12.0 V (≥ 12 V needed)</text>
+    <text x="724" y="185" text-anchor="end" class="tiny">16 AWG</text>
 
-    <!-- DROK to camera -->
-    <path class="posl" d="M 860 64 L 878 64"/>
-    <path class="negl" d="M 860 76 L 878 76"/>
-    <rect x="878" y="30" width="112" height="78" rx="6" class="box"/>
-    <circle cx="904" cy="58" r="13" fill="#2a2f38"/><circle cx="904" cy="58" r="6" fill="#4d78a8"/>
-    <text x="922" y="54" class="title" font-size="11.5">VIGI S445</text>
-    <text x="922" y="67" class="sub">camera</text>
-    <text x="934" y="86" text-anchor="middle" class="tiny">12 V DC barrel · ≤ 11 W</text>
-    <text x="934" y="98" text-anchor="middle" class="tiny">5.5 mm (check polarity)</text>
+    <!-- DROK to PoE injector DC input -->
+    <path class="posl" d="M 860 128 L 878 128"/>
+    <path class="negl" d="M 860 140 L 878 140"/>
+    <rect x="878" y="112" width="112" height="52" rx="6" class="box" stroke="#1e9b5a"/>
+    <text x="934" y="129" text-anchor="middle" class="title" font-size="11.5">PoE+ injector</text>
+    <text x="934" y="142" text-anchor="middle" class="sub">PLUSPOE · 802.3at</text>
+    <text x="934" y="156" text-anchor="middle" class="tiny">12 V DC terminal in</text>
+
+    <!-- PoE to camera -->
+    <path class="poe" d="M 934 112 L 934 92"/>
+    <text x="941" y="105" class="tiny" fill="#0f6e3d" font-weight="700">PoE</text>
+    <rect x="878" y="14" width="112" height="78" rx="6" class="box"/>
+    <circle cx="904" cy="40" r="13" fill="#2a2f38"/><circle cx="904" cy="40" r="6" fill="#4d78a8"/>
+    <text x="922" y="37" class="title" font-size="11.5">VIGI S445</text>
+    <text x="922" y="50" class="sub">camera</text>
+    <text x="934" y="70" text-anchor="middle" class="tiny">PoE in (RJ45) · ≤ 11 W</text>
+    <text x="934" y="83" text-anchor="middle" class="tiny">12 V barrel not used</text>
 
     <!-- Branch B: to USB-C converter (straight) -->
     <path class="posl" d="M 716 258 L 752 258"/>
@@ -233,13 +242,13 @@
     <text x="934" y="292" text-anchor="middle" class="tiny" fill="#7b3fb5" font-weight="700">USB-C 5 V in</text>
     <text x="934" y="312" text-anchor="middle" class="tiny">reads Victron (telemetry)</text>
     <!-- LTE antenna -->
-    <line x1="978" y1="196" x2="978" y2="168" stroke="#1d2430" stroke-width="2"/>
-    <path d="M 970 168 L 978 158 L 986 168" fill="none" stroke="#1d2430" stroke-width="2"/>
-    <text x="978" y="150" text-anchor="middle" class="tiny">LTE</text>
+    <line x1="892" y1="196" x2="892" y2="180" stroke="#1d2430" stroke-width="2"/>
+    <path d="M 884 180 L 892 171 L 900 180" fill="none" stroke="#1d2430" stroke-width="2"/>
+    <text x="880" y="186" text-anchor="end" class="tiny">LTE</text>
 
-    <!-- Ethernet camera to Pi -->
-    <path class="eth" d="M 934 108 L 934 196"/>
-    <text x="940" y="128" class="tiny" fill="#1e9b5a" font-weight="700">Ethernet</text>
+    <!-- Ethernet Pi to injector data in -->
+    <path class="eth" d="M 962 196 L 962 164"/>
+    <text x="968" y="184" class="tiny" fill="#1e9b5a" font-weight="700">Data</text>
 
     <!-- Bluetooth Victron to Pi -->
     <path class="bt" d="M 610 330 C 700 400, 830 400, 900 324"/>
@@ -247,13 +256,14 @@
 
     <!-- ============ LEGEND ============ -->
     <g transform="translate(40,470)">
-      <rect x="-10" y="-14" width="120" height="104" rx="5" fill="#f5f7fa" stroke="#d5dbe4"/>
+      <rect x="-10" y="-14" width="134" height="120" rx="5" fill="#f5f7fa" stroke="#d5dbe4"/>
       <text x="0" y="0" class="tiny" font-weight="700">KEY</text>
       <line x1="0" y1="14" x2="26" y2="14" class="pos"/><text x="32" y="17" class="tiny">Positive (+)</text>
       <line x1="0" y1="30" x2="26" y2="30" class="neg"/><text x="32" y="33" class="tiny">Negative (−)</text>
       <line x1="0" y1="46" x2="26" y2="46" class="usb"/><text x="32" y="49" class="tiny">USB-C 5 V</text>
       <line x1="0" y1="62" x2="26" y2="62" class="eth"/><text x="32" y="65" class="tiny">Ethernet data</text>
-      <line x1="0" y1="78" x2="26" y2="78" class="bt"/><text x="32" y="81" class="tiny">Bluetooth</text>
+      <line x1="0" y1="78" x2="26" y2="78" class="poe"/><text x="32" y="81" class="tiny">PoE (data + power)</text>
+      <line x1="0" y1="94" x2="26" y2="94" class="bt"/><text x="32" y="97" class="tiny">Bluetooth</text>
     </g>
   </svg>
   <footer>Terminal positions on the charger are schematic: follow the markings on the unit. Camera and Pi negatives return through the fuse block's − bus to the Victron LOAD − terminal, never straight to the battery, so the Victron sees and controls all load current.</footer>
@@ -280,7 +290,9 @@
         <tr><td>Batteries</td><td>4 × MK Powered 12V-18 (18 Ah/20 h, sealed lead-acid, treated as AGM), about 2022</td><td>Owned</td></tr>
         <tr><td>Battery cable</td><td>10 AWG, 8 equal-length leads plus charger leads; ring terminals to fit the tab bolts (M5 or M6, measure); one spare nut and bolt</td><td>Not bought</td></tr>
         <tr><td>Load fuse block</td><td>2-way ATC block with negative bus, 2 × 5 A</td><td>Not bought</td></tr>
-        <tr><td>Camera supply</td><td>DROK 12 V / 5 A regulated converter, set to 12.0 V</td><td>Owned</td></tr>
+        <tr><td>Injector supply</td><td>DROK 12 V / 5 A regulated converter, 12.0 V; if adjustable, about 13 V gives margin over the injector's 12 V minimum</td><td>Owned</td></tr>
+        <tr><td>PoE injector</td><td>PLUSPOE PoE+ 30 W 802.3at gigabit (B0DZGCPPX8), 12 V DC terminal input</td><td>Owned</td></tr>
+        <tr><td>Ethernet cables</td><td>Two: injector to camera (outdoor-rated for the field run) and Pi to injector data port</td><td>Check</td></tr>
         <tr><td>Pi supply</td><td>12 V → 5 V / 3 A converter with USB-C plug</td><td>Owned</td></tr>
         <tr><td>Load wiring</td><td>16 AWG (18 AWG acceptable for short bench leads)</td><td>Owned</td></tr>
       </table>
@@ -303,7 +315,7 @@
         <li>Read the ship-code sticker on all four batteries; note any that differ from A-22 / 7-22.</li>
         <li>Charge each battery on its own (MotoMaster fixed 2 A or the NOCO G750).</li>
         <li>Rest a few hours; resting voltages should agree within 0.1 V. After a day's rest a healthy battery reads 12.8 V or more. Leave out any that don't.</li>
-        <li>Check the DROK reads 12.0 V on a meter before connecting the camera, and check the camera plug's polarity.</li>
+        <li>Check the DROK reads at least 12.0 V on a meter, and the polarity at the injector's DC terminals, before connecting the injector. Leave the camera's 12 V barrel unconnected.</li>
       </ol>
 
       <h2>Connection order</h2>
@@ -313,12 +325,13 @@
         <li><b>Battery to the Victron first</b>, and wait for it to start up and detect 12 V.</li>
         <li>Set up the Victron in VictronConnect (settings at left).</li>
         <li>Wire the panel through the isolator to the PV terminals, then close the isolator.</li>
-        <li>Fit the load fuses: camera branch, then Pi branch.</li>
+        <li>Fit the load fuses: camera branch (DROK and injector), then Pi branch. Confirm the camera boots on PoE and the Pi sees it.</li>
       </ol>
       <p style="font-size:8.6pt;margin:-6px 0 12px"><b>To disconnect:</b> reverse order. Open the PV isolator first, then pull the main fuse.</p>
 
       <div class="warn"><b>One panel will not keep up.</b> A 100 W panel gives about 160 Wh/day on an average December day, enough for about 6.7 W. The system draws about 13 W, so the bank will run down over a few days and the 11.8 V load disconnect will switch it off. That is expected: this test measures harvest and draw. Adding the second panel in series (about 44 V, within the 75 V limit) roughly doubles harvest.</div>
       <div class="warn"><b>Cold.</b> At −20 °C these batteries give about 50–60% of rated capacity, and a lead-acid battery near half charge can freeze around −24 °C. Don't lower the 11.8 V disconnect for a cold test. The bank weighs about 22 kg.</div>
+      <div class="warn"><b>PoE costs power.</b> The DROK and the injector are two conversions in a row, so expect the camera to draw about 1–2 W more from the battery than on its 12 V input. Measure it: telemetry logs the Victron's load current.</div>
       <div class="warn"><b>Age.</b> The batteries date from about early 2022, near the end of a typical 3–5 year life. The 72 Ah figure is nominal until the capacity has been measured.</div>
     </div>
   </div>
