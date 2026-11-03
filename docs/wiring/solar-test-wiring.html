@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Solstead solar test wiring</title>
+<style>
+  @page { size: 11in 8.5in; margin: 0.45in 0.5in; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: #1d2430; font-size: 10pt; }
+  .page { height: 7.55in; overflow: hidden; display: flex; flex-direction: column; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #1d2430; padding-bottom: 5px; margin-bottom: 8px; }
+  h1 { font-size: 17pt; margin: 0; letter-spacing: -0.2px; }
+  h1 span { color: #e8822a; }
+  .meta { font-size: 8.5pt; color: #5a6475; text-align: right; }
+  svg { width: 100%; flex: 1; }
+  h2 { font-size: 11pt; margin: 0 0 5px; color: #1a5fa8; text-transform: uppercase; letter-spacing: 0.6px; }
+  .cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px; flex: 1; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.6pt; margin-bottom: 12px; }
+  th { text-align: left; background: #eef2f7; color: #1d2430; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #c9d2de; }
+  td { padding: 3.5px 6px; border-bottom: 1px solid #e3e8ef; vertical-align: top; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  td:last-child:not(:nth-child(2)) { white-space: nowrap; }
+  .cols { min-height: 0; }
+  ol, ul { margin: 0 0 12px; padding-left: 18px; font-size: 8.8pt; line-height: 1.38; }
+  li { margin-bottom: 2px; }
+  .warn { background: #fff4e8; border-left: 4px solid #e8822a; padding: 7px 10px; font-size: 8.6pt; line-height: 1.38; margin-bottom: 10px; }
+  .warn b { color: #b85d12; }
+  footer { font-size: 7.5pt; color: #8a93a3; border-top: 1px solid #d5dbe4; padding-top: 4px; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<!-- Page 1: diagram -->
+<div class="page">
+  <header>
+    <h1>Solstead solar test <span>·</span> complete wiring</h1>
+    <div class="meta">One 100 W panel · Victron SmartSolar MPPT 75/15 · 4 × MK 12V-18 SLA in parallel (12 V, 72 Ah)<br>Draft 2026-11-03 · schematic, not to scale</div>
+  </header>
+
+  <svg viewBox="0 0 1000 640" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica Neue, Helvetica, Arial, sans-serif">
+    <defs>
+      <pattern id="cells" width="22.5" height="20" patternUnits="userSpaceOnUse">
+        <rect width="22.5" height="20" fill="#1f3b63"/>
+        <rect x="1" y="1" width="20.5" height="18" fill="#264b7d"/>
+      </pattern>
+      <marker id="dot" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="5" markerHeight="5"><circle cx="3" cy="3" r="3" fill="#1d2430"/></marker>
+    </defs>
+
+    <style>
+      .pos { stroke: #d62d2d; stroke-width: 3.2; fill: none; stroke-linejoin: round; }
+      .neg { stroke: #1d2430; stroke-width: 3.2; fill: none; stroke-linejoin: round; }
+      .posl { stroke: #d62d2d; stroke-width: 2.2; fill: none; stroke-linejoin: round; }
+      .negl { stroke: #1d2430; stroke-width: 2.2; fill: none; stroke-linejoin: round; }
+      .usb { stroke: #7b3fb5; stroke-width: 2.6; fill: none; }
+      .eth { stroke: #1e9b5a; stroke-width: 2.4; fill: none; stroke-dasharray: 7 4; }
+      .bt { stroke: #2f7fd6; stroke-width: 2; fill: none; stroke-dasharray: 2 4; stroke-linecap: round; }
+      .box { fill: #ffffff; stroke: #5a6475; stroke-width: 1.4; }
+      .title { font-size: 12.5px; font-weight: 700; fill: #1d2430; }
+      .sub { font-size: 10px; fill: #4a5465; }
+      .tiny { font-size: 9px; fill: #5a6475; }
+      .wire { font-size: 9.5px; fill: #1d2430; font-weight: 600; }
+      .fuse { fill: #f6c443; stroke: #8a6a10; stroke-width: 1.2; }
+      .term { font-size: 9px; font-weight: 700; fill: #ffffff; }
+    </style>
+
+    <!-- ============ SOLAR PANEL ============ -->
+    <rect x="40" y="20" width="180" height="120" rx="3" fill="url(#cells)" stroke="#a9b3c2" stroke-width="4"/>
+    <text x="130" y="160" text-anchor="middle" class="title">Solar panel, 100 W bifacial</text>
+    <text x="130" y="174" text-anchor="middle" class="sub">ECO-WORTHY, one of the 2-panel kit</text>
+    <text x="130" y="187" text-anchor="middle" class="sub">Voc ≈ 22 V, Isc ≈ 6 A (check label)</text>
+    <text x="130" y="200" text-anchor="middle" class="sub">South-facing, 75° tilt</text>
+
+    <!-- panel leads down to isolator -->
+    <path class="pos" d="M 245 80 L 260 80 L 260 268 L 210 268"/>
+    <path class="neg" d="M 245 100 L 250 100 L 250 288 L 210 288"/>
+    <rect x="220" y="72" width="26" height="16" rx="3" fill="#2a2f38"/><text x="233" y="83.5" text-anchor="middle" class="term">MC4</text>
+    <rect x="220" y="92" width="26" height="16" rx="3" fill="#2a2f38"/><text x="233" y="103.5" text-anchor="middle" class="term">MC4</text>
+    <text x="270" y="112" class="wire">10 AWG PV cable</text>
+    <text x="270" y="125" class="tiny">MC4 extension, up to 5 m</text>
+
+    <!-- DC isolator -->
+    <rect x="90" y="245" width="120" height="66" rx="6" class="box"/>
+    <rect x="102" y="257" width="14" height="42" rx="2" fill="#e8822a"/>
+    <text x="124" y="267" class="title" font-size="11.5">DC isolator</text>
+    <text x="124" y="281" class="sub">2-pole DC breaker</text>
+    <text x="124" y="294" class="sub">≥ 10 A, ≥ 50 V DC</text>
+    <text x="150" y="328" text-anchor="middle" class="tiny">Switch off before touching</text>
+    <text x="150" y="340" text-anchor="middle" class="tiny">the charger's PV terminals</text>
+
+    <!-- isolator to Victron PV terminals -->
+    <path class="pos" d="M 90 268 L 70 268 L 70 392 L 400 392 L 400 362"/>
+    <path class="neg" d="M 90 288 L 80 288 L 80 380 L 430 380 L 430 362"/>
+    <text x="260" y="374" class="wire">PV + / PV −</text>
+
+    <!-- ============ VICTRON ============ -->
+    <rect x="370" y="160" width="240" height="190" rx="10" fill="#1a5fa8"/>
+    <rect x="370" y="160" width="240" height="190" rx="10" fill="none" stroke="#0f3f73" stroke-width="2"/>
+    <text x="490" y="192" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">Victron SmartSolar</text>
+    <text x="490" y="210" text-anchor="middle" font-size="12" fill="#d6e6f8">MPPT 75/15 charge controller</text>
+    <text x="490" y="236" text-anchor="middle" font-size="9.5" fill="#d6e6f8">Battery: 12 V lead-acid, default preset</text>
+    <text x="490" y="249" text-anchor="middle" font-size="9.5" fill="#d6e6f8">14.4 V absorption · 13.8 V float</text>
+    <text x="490" y="262" text-anchor="middle" font-size="9.5" fill="#d6e6f8">Temperature compensation on</text>
+    <text x="490" y="275" text-anchor="middle" font-size="9.5" fill="#d6e6f8">Load: off 11.8 V · on 12.8 V</text>
+    <!-- terminal strip -->
+    <rect x="380" y="320" width="220" height="42" rx="4" fill="#0f3f73"/>
+    <g>
+      <rect x="390" y="330" width="20" height="22" rx="2" fill="#d62d2d"/><text x="400" y="345" text-anchor="middle" class="term">+</text>
+      <rect x="420" y="330" width="20" height="22" rx="2" fill="#2a2f38"/><text x="430" y="345" text-anchor="middle" class="term">−</text>
+      <text x="415" y="314" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff">PV</text>
+      <rect x="490" y="330" width="20" height="22" rx="2" fill="#2a2f38"/><text x="500" y="345" text-anchor="middle" class="term">−</text>
+      <rect x="530" y="330" width="20" height="22" rx="2" fill="#d62d2d"/><text x="540" y="345" text-anchor="middle" class="term">+</text>
+      <text x="520" y="314" text-anchor="middle" font-size="9" font-weight="700" fill="#ffffff">BATTERY</text>
+    </g>
+    <!-- load terminals on right side -->
+    <rect x="596" y="214" width="22" height="20" rx="2" fill="#d62d2d"/><text x="607" y="228" text-anchor="middle" class="term">+</text>
+    <rect x="596" y="244" width="22" height="20" rx="2" fill="#2a2f38"/><text x="607" y="258" text-anchor="middle" class="term">−</text>
+    <text x="585" y="299" text-anchor="end" font-size="9" font-weight="700" fill="#ffffff">LOAD →</text>
+
+    <!-- ============ BATTERY CONNECTION ============ -->
+    <!-- BAT+ through main fuse to + busbar centre -->
+    <path class="pos" d="M 540 362 L 540 450"/>
+    <rect x="530" y="384" width="20" height="38" rx="3" class="fuse"/>
+    <text x="560" y="399" class="wire">20 A main fuse</text>
+    <text x="560" y="412" class="tiny">close to the bank</text>
+    <text x="560" y="436" class="tiny">10 AWG</text>
+    <!-- BAT- round the left to - busbar centre -->
+    <path class="neg" d="M 500 362 L 500 404 L 170 404 L 170 618 L 520 618 L 520 605"/>
+    <text x="300" y="420" class="tiny">10 AWG, BAT − to negative busbar</text>
+
+    <!-- + busbar -->
+    <rect x="190" y="446" width="660" height="12" rx="2" fill="#c0392b"/>
+    <text x="196" y="441" class="wire" fill="#c0392b">+ BUSBAR</text>
+    <!-- - busbar -->
+    <rect x="190" y="592" width="660" height="12" rx="2" fill="#2a2f38"/>
+    <text x="856" y="602" class="wire">− BUSBAR</text>
+
+    <!-- batteries -->
+    <g id="batts">
+      <!-- battery template at x offsets 205, 370, 535, 700 -->
+    </g>
+    <g>
+      <!-- B1 -->
+      <path class="posl" d="M 315 458 L 315 512"/><rect x="306" y="466" width="18" height="30" rx="3" class="fuse"/>
+      <path class="negl" d="M 235 568 L 235 592"/>
+      <rect x="215" y="512" width="125" height="56" rx="5" fill="#2a2f38"/>
+      <rect x="306" y="506" width="18" height="8" fill="#d62d2d"/><rect x="226" y="506" width="18" height="8" fill="#7d8796"/>
+      <text x="277" y="536" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">MK 12V-18</text>
+      <text x="277" y="551" text-anchor="middle" font-size="9" fill="#c9d2de">12 V · 18 Ah SLA (AGM)</text>
+      <text x="277" y="563" text-anchor="middle" font-size="8.5" fill="#9aa5b5">Battery 1</text>
+      <!-- B2 -->
+      <path class="posl" d="M 480 458 L 480 512"/><rect x="471" y="466" width="18" height="30" rx="3" class="fuse"/>
+      <path class="negl" d="M 400 568 L 400 592"/>
+      <rect x="380" y="512" width="125" height="56" rx="5" fill="#2a2f38"/>
+      <rect x="471" y="506" width="18" height="8" fill="#d62d2d"/><rect x="391" y="506" width="18" height="8" fill="#7d8796"/>
+      <text x="442" y="536" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">MK 12V-18</text>
+      <text x="442" y="551" text-anchor="middle" font-size="9" fill="#c9d2de">12 V · 18 Ah SLA (AGM)</text>
+      <text x="442" y="563" text-anchor="middle" font-size="8.5" fill="#9aa5b5">Battery 2</text>
+      <!-- B3 -->
+      <path class="posl" d="M 645 458 L 645 512"/><rect x="636" y="466" width="18" height="30" rx="3" class="fuse"/>
+      <path class="negl" d="M 565 568 L 565 592"/>
+      <rect x="545" y="512" width="125" height="56" rx="5" fill="#2a2f38"/>
+      <rect x="636" y="506" width="18" height="8" fill="#d62d2d"/><rect x="556" y="506" width="18" height="8" fill="#7d8796"/>
+      <text x="607" y="536" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">MK 12V-18</text>
+      <text x="607" y="551" text-anchor="middle" font-size="9" fill="#c9d2de">12 V · 18 Ah SLA (AGM)</text>
+      <text x="607" y="563" text-anchor="middle" font-size="8.5" fill="#9aa5b5">Battery 3</text>
+      <!-- B4 -->
+      <path class="posl" d="M 810 458 L 810 512"/><rect x="801" y="466" width="18" height="30" rx="3" class="fuse"/>
+      <path class="negl" d="M 730 568 L 730 592"/>
+      <rect x="710" y="512" width="125" height="56" rx="5" fill="#2a2f38"/>
+      <rect x="801" y="506" width="18" height="8" fill="#d62d2d"/><rect x="721" y="506" width="18" height="8" fill="#7d8796"/>
+      <text x="772" y="536" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">MK 12V-18</text>
+      <text x="772" y="551" text-anchor="middle" font-size="9" fill="#c9d2de">12 V · 18 Ah SLA (AGM)</text>
+      <text x="772" y="563" text-anchor="middle" font-size="8.5" fill="#9aa5b5">Battery 4</text>
+    </g>
+    <text x="862" y="474" class="wire">20 A fuse on each</text>
+    <text x="862" y="487" class="tiny">battery + lead</text>
+    <text x="862" y="508" class="wire">Equal-length leads</text>
+    <text x="862" y="521" class="tiny">10 AWG, same length</text>
+    <text x="862" y="534" class="tiny">for all 8 leads</text>
+    <text x="862" y="555" class="tiny">Bank: 12 V, 72 Ah</text>
+    <text x="862" y="568" class="tiny">≈ 864 Wh nominal</text>
+
+    <!-- ============ LOADS ============ -->
+    <!-- Victron LOAD to fuse block -->
+    <path class="pos" d="M 618 224 L 650 224"/>
+    <path class="neg" d="M 618 254 L 650 254"/>
+    <rect x="650" y="196" width="66" height="96" rx="5" class="box"/>
+    <rect x="662" y="208" width="14" height="24" rx="2" class="fuse"/>
+    <rect x="690" y="208" width="14" height="24" rx="2" class="fuse"/>
+    <rect x="660" y="262" width="46" height="10" rx="2" fill="#2a2f38"/>
+    <text x="683" y="249" text-anchor="middle" class="tiny" font-weight="700">2 × 5 A</text>
+    <text x="683" y="306" text-anchor="middle" class="tiny" font-weight="700">Fuse block</text>
+    <text x="683" y="318" text-anchor="middle" class="tiny">with − bus</text>
+
+    <!-- Branch A: to DROK (up) -->
+    <path class="posl" d="M 716 214 L 728 214 L 728 64 L 752 64"/>
+    <path class="negl" d="M 716 224 L 736 224 L 736 76 L 752 76"/>
+    <rect x="752" y="40" width="108" height="64" rx="6" class="box"/>
+    <text x="806" y="61" text-anchor="middle" class="title" font-size="11.5">DROK 12 V / 5 A</text>
+    <text x="806" y="75" text-anchor="middle" class="sub">regulated converter</text>
+    <text x="806" y="88" text-anchor="middle" class="sub">set to 12.0 V</text>
+    <text x="724" y="150" text-anchor="end" class="tiny">16 AWG</text>
+
+    <!-- DROK to camera -->
+    <path class="posl" d="M 860 64 L 878 64"/>
+    <path class="negl" d="M 860 76 L 878 76"/>
+    <rect x="878" y="30" width="112" height="78" rx="6" class="box"/>
+    <circle cx="904" cy="58" r="13" fill="#2a2f38"/><circle cx="904" cy="58" r="6" fill="#4d78a8"/>
+    <text x="922" y="54" class="title" font-size="11.5">VIGI S445</text>
+    <text x="922" y="67" class="sub">camera</text>
+    <text x="934" y="86" text-anchor="middle" class="tiny">12 V DC barrel · ≤ 11 W</text>
+    <text x="934" y="98" text-anchor="middle" class="tiny">5.5 mm (check polarity)</text>
+
+    <!-- Branch B: to USB-C converter (straight) -->
+    <path class="posl" d="M 716 258 L 752 258"/>
+    <path class="negl" d="M 716 268 L 752 268"/>
+    <rect x="752" y="232" width="108" height="62" rx="6" class="box"/>
+    <text x="806" y="254" text-anchor="middle" class="title" font-size="11.5">12 V → 5 V</text>
+    <text x="806" y="268" text-anchor="middle" class="sub">3 A converter</text>
+    <text x="806" y="281" text-anchor="middle" class="sub">USB-C output</text>
+
+    <!-- USB-C to Pi -->
+    <path class="usb" d="M 860 263 L 878 263"/>
+
+    <!-- Pi -->
+    <rect x="878" y="196" width="112" height="128" rx="6" fill="#e7f4ea" stroke="#2f8a4c" stroke-width="1.4"/>
+    <text x="934" y="220" text-anchor="middle" class="title" font-size="11.5">Raspberry Pi 4</text>
+    <text x="934" y="234" text-anchor="middle" class="sub">controller</text>
+    <line x1="890" y1="244" x2="978" y2="244" stroke="#b6d9c0"/>
+    <text x="934" y="259" text-anchor="middle" class="tiny">+ SIM7600G-H LTE HAT</text>
+    <text x="934" y="272" text-anchor="middle" class="tiny">+ USB SSD (recordings)</text>
+    <text x="934" y="292" text-anchor="middle" class="tiny" fill="#7b3fb5" font-weight="700">USB-C 5 V in</text>
+    <text x="934" y="312" text-anchor="middle" class="tiny">reads Victron (telemetry)</text>
+    <!-- LTE antenna -->
+    <line x1="978" y1="196" x2="978" y2="168" stroke="#1d2430" stroke-width="2"/>
+    <path d="M 970 168 L 978 158 L 986 168" fill="none" stroke="#1d2430" stroke-width="2"/>
+    <text x="978" y="150" text-anchor="middle" class="tiny">LTE</text>
+
+    <!-- Ethernet camera to Pi -->
+    <path class="eth" d="M 934 108 L 934 196"/>
+    <text x="940" y="128" class="tiny" fill="#1e9b5a" font-weight="700">Ethernet</text>
+
+    <!-- Bluetooth Victron to Pi -->
+    <path class="bt" d="M 610 330 C 700 400, 830 400, 900 324"/>
+    <text x="755" y="408" text-anchor="middle" class="tiny" fill="#2f7fd6" font-weight="700">Bluetooth (Instant Readout)</text>
+
+    <!-- ============ LEGEND ============ -->
+    <g transform="translate(40,470)">
+      <rect x="-10" y="-14" width="120" height="104" rx="5" fill="#f5f7fa" stroke="#d5dbe4"/>
+      <text x="0" y="0" class="tiny" font-weight="700">KEY</text>
+      <line x1="0" y1="14" x2="26" y2="14" class="pos"/><text x="32" y="17" class="tiny">Positive (+)</text>
+      <line x1="0" y1="30" x2="26" y2="30" class="neg"/><text x="32" y="33" class="tiny">Negative (−)</text>
+      <line x1="0" y1="46" x2="26" y2="46" class="usb"/><text x="32" y="49" class="tiny">USB-C 5 V</text>
+      <line x1="0" y1="62" x2="26" y2="62" class="eth"/><text x="32" y="65" class="tiny">Ethernet data</text>
+      <line x1="0" y1="78" x2="26" y2="78" class="bt"/><text x="32" y="81" class="tiny">Bluetooth</text>
+    </g>
+  </svg>
+  <footer>Terminal positions on the charger are schematic: follow the markings on the unit. Camera and Pi negatives return through the fuse block's − bus to the Victron LOAD − terminal, never straight to the battery, so the Victron sees and controls all load current.</footer>
+</div>
+
+<!-- Page 2: parts, settings, procedure -->
+<div class="page">
+  <header>
+    <h1>Parts, settings <span>&amp;</span> connection order</h1>
+    <div class="meta">Recorded in docs/product-notes.md, "Four-battery SLA bank for the solar test"<br>Draft 2026-11-03</div>
+  </header>
+  <div class="cols">
+    <div>
+      <h2>Parts</h2>
+      <table>
+        <tr><th>Part</th><th>Rating / choice</th><th>Status</th></tr>
+        <tr><td>Solar panel</td><td>ECO-WORTHY 100 W bifacial, one panel of the 2 × 100 W kit (B0B3RW7HC9)</td><td>Not bought</td></tr>
+        <tr><td>PV cable</td><td>10 AWG MC4 extension, up to 5 m (iGreely 20 ft, C$44.99)</td><td>Not bought</td></tr>
+        <tr><td>DC isolator</td><td>2-pole DC breaker or switch, ≥ 10 A, ≥ 50 V DC (enough for both panels in series later)</td><td>Not bought</td></tr>
+        <tr><td>Charge controller</td><td>Victron SmartSolar MPPT 75/15</td><td>Owned</td></tr>
+        <tr><td>Main battery fuse</td><td>20 A (MIDI or inline ATC), in BAT + close to the bank</td><td>Not bought</td></tr>
+        <tr><td>Busbars</td><td>Pair, + and −, at least 5 studs each, ≥ 30 A</td><td>Not bought</td></tr>
+        <tr><td>Battery fuses</td><td>4 × 20 A inline ATC holders, one per battery + lead</td><td>Not bought</td></tr>
+        <tr><td>Batteries</td><td>4 × MK Powered 12V-18 (18 Ah/20 h, sealed lead-acid, treated as AGM), about 2022</td><td>Owned</td></tr>
+        <tr><td>Battery cable</td><td>10 AWG, 8 equal-length leads plus charger leads; ring terminals to fit the tab bolts (M5 or M6, measure); one spare nut and bolt</td><td>Not bought</td></tr>
+        <tr><td>Load fuse block</td><td>2-way ATC block with negative bus, 2 × 5 A</td><td>Not bought</td></tr>
+        <tr><td>Camera supply</td><td>DROK 12 V / 5 A regulated converter, set to 12.0 V</td><td>Owned</td></tr>
+        <tr><td>Pi supply</td><td>12 V → 5 V / 3 A converter with USB-C plug</td><td>Owned</td></tr>
+        <tr><td>Load wiring</td><td>16 AWG (18 AWG acceptable for short bench leads)</td><td>Owned</td></tr>
+      </table>
+
+      <h2>Victron settings (VictronConnect)</h2>
+      <table>
+        <tr><th>Setting</th><th>Value</th></tr>
+        <tr><td>Battery voltage</td><td>12 V (set it; don't rely on auto-detect)</td></tr>
+        <tr><td>Battery preset</td><td>Default: 14.4 V absorption, 13.8 V float. Within the label's 14.4–15.0 V cycle and 13.5–13.8 V standby ranges</td></tr>
+        <tr><td>Max charge current</td><td>15 A (about 0.2C for 72 Ah; label allows 5.4 A per battery, 21.6 A for the bank)</td></tr>
+        <tr><td>Temperature comp.</td><td>On, default −16.2 mV/°C. Keep charger and bank in the same enclosure</td></tr>
+        <tr><td>Load output</td><td>User-defined: off at 11.8 V, back on at 12.8 V</td></tr>
+        <tr><td>Instant Readout</td><td>On, so the Pi can read it over Bluetooth</td></tr>
+      </table>
+    </div>
+
+    <div>
+      <h2>Before first connection</h2>
+      <ol>
+        <li>Read the ship-code sticker on all four batteries; note any that differ from A-22 / 7-22.</li>
+        <li>Charge each battery on its own (MotoMaster fixed 2 A or the NOCO G750).</li>
+        <li>Rest a few hours; resting voltages should agree within 0.1 V. After a day's rest a healthy battery reads 12.8 V or more. Leave out any that don't.</li>
+        <li>Check the DROK reads 12.0 V on a meter before connecting the camera, and check the camera plug's polarity.</li>
+      </ol>
+
+      <h2>Connection order</h2>
+      <ol>
+        <li>Fuses out. Build the bank: each battery to the busbars with its own equal-length leads.</li>
+        <li>Fit the four battery fuses, then the 20 A main fuse.</li>
+        <li><b>Battery to the Victron first</b>, and wait for it to start up and detect 12 V.</li>
+        <li>Set up the Victron in VictronConnect (settings at left).</li>
+        <li>Wire the panel through the isolator to the PV terminals, then close the isolator.</li>
+        <li>Fit the load fuses: camera branch, then Pi branch.</li>
+      </ol>
+      <p style="font-size:8.6pt;margin:-6px 0 12px"><b>To disconnect:</b> reverse order. Open the PV isolator first, then pull the main fuse.</p>
+
+      <div class="warn"><b>One panel will not keep up.</b> A 100 W panel gives about 160 Wh/day on an average December day, enough for about 6.7 W. The system draws about 13 W, so the bank will run down over a few days and the 11.8 V load disconnect will switch it off. That is expected: this test measures harvest and draw. Adding the second panel in series (about 44 V, within the 75 V limit) roughly doubles harvest.</div>
+      <div class="warn"><b>Cold.</b> At −20 °C these batteries give about 50–60% of rated capacity, and a lead-acid battery near half charge can freeze around −24 °C. Don't lower the 11.8 V disconnect for a cold test. The bank weighs about 22 kg.</div>
+      <div class="warn"><b>Age.</b> The batteries date from about early 2022, near the end of a typical 3–5 year life. The 72 Ah figure is nominal until the capacity has been measured.</div>
+    </div>
+  </div>
+  <footer>Solstead · solar test wiring · schematic for a bench and winter field test, not a certified installation drawing.</footer>
+</div>
+
+</body>
+</html>
