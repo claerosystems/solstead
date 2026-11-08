@@ -55,6 +55,67 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay {
+            if let activity = model.activity {
+                WaitCard(activity: activity)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.activity != nil)
+    }
+}
+
+/// Covers the screen while a camera request runs, wherever the owner has scrolled.
+struct WaitCard: View {
+    @EnvironmentObject private var model: ControllerModel
+    let activity: CameraActivity
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.3).ignoresSafeArea()
+            VStack(spacing: 14) {
+                content
+            }
+            .padding(24)
+            .frame(maxWidth: 300)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch activity.phase {
+        case let .working(step, countdown):
+            TimelineView(.periodic(from: activity.started, by: 0.25)) { context in
+                VStack(spacing: 14) {
+                    if let countdown, countdown.fraction(at: context.date) < 1 {
+                        ProgressView(value: countdown.fraction(at: context.date))
+                        Text(step).multilineTextAlignment(.center)
+                    } else {
+                        ProgressView().controlSize(.large)
+                        Text(countdown?.then ?? step).multilineTextAlignment(.center)
+                    }
+                    Text("\(Int(context.date.timeIntervalSince(activity.started))) s")
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        .accessibilityLabel("\(Int(context.date.timeIntervalSince(activity.started))) seconds elapsed")
+                }
+            }
+            Button("Cancel", role: .cancel) { model.cancelActivity() }
+                .buttonStyle(.bordered)
+        case let .succeeded(text):
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 40)).foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text(text).multilineTextAlignment(.center)
+        case let .failed(error):
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 36)).foregroundStyle(.red)
+                .accessibilityHidden(true)
+            Text(error).foregroundStyle(.red).multilineTextAlignment(.center)
+            Button("OK") { model.dismissActivity() }
+                .buttonStyle(.borderedProminent)
+        }
     }
 }
 
@@ -443,13 +504,13 @@ struct CameraSection: View {
                 }
                 .padding(.vertical, 4)
             }
-            Button("View live", systemImage: "video") { Task { await model.startLive() } }
+            Button("View live", systemImage: "video") { model.viewLive() }
                 .disabled(!(status.live?.available ?? status.camera.configured))
-            Button("Take snapshot", systemImage: "camera") { Task { await model.takeSnapshot() } }
+            Button("Take snapshot", systemImage: "camera") { model.takeSnapshot() }
                 .disabled(!status.camera.configured)
-            Button("Record 10-second test clip", systemImage: "record.circle") { Task { await model.recordTestClip() } }
+            Button("Save last 10 seconds", systemImage: "record.circle") { model.saveManualRecording() }
                 .disabled(!status.camera.configured || !status.storage.ready)
-            Text("Manual test recording from the buffered stream.")
+            Text("Saves a manual recording from the stream buffer. If the buffer isn't running, it records the next 10 seconds instead.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
