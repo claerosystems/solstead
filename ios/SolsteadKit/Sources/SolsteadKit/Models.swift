@@ -45,6 +45,7 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let thermal: Thermal?
     public let encryption: EncryptionStatus?
     public let telemetry: TelemetryStatus?
+    public let charger: ChargerStatus?
     public let recordingMode: String
     public let remoteAccess: Bool
 }

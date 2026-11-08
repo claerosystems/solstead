@@ -72,6 +72,9 @@ struct SettingsView: View {
                 if let lapse = model.timelapse {
                     TimeLapseSettingsSection(lapse: lapse)
                 }
+                if let charger = model.charger {
+                    ChargerSettingsSection(charger: charger)
+                }
                 if let telemetry = model.telemetry {
                     TelemetrySettingsSection(telemetry: telemetry)
                 }

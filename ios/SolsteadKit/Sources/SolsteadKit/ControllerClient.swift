@@ -157,6 +157,23 @@ public struct ControllerClient: Sendable {
         return try decode(TelemetryStatus.self, from: await request("v1/telemetry", method: "PUT", body: body))
     }
 
+    /// The solar charger in use and the Victron chargers the controller can hear.
+    public func charger() async throws -> ChargerStatus {
+        try decode(ChargerStatus.self, from: await request("v1/charger"))
+    }
+
+    /// Reads the chosen charger from now on. The controller checks the key against a broadcast
+    /// and keeps it; it is never sent back.
+    public func chooseCharger(_ choice: ChargerChoice) async throws -> ChargerStatus {
+        let body = try ControllerJSONEncoder.encoder.encode(choice)
+        return try decode(ChargerStatus.self, from: await request("v1/charger", method: "PUT", body: body))
+    }
+
+    /// Stops reading the charger and deletes its key from the controller.
+    public func forgetCharger() async throws -> ChargerStatus {
+        try decode(ChargerStatus.self, from: await request("v1/charger", method: "DELETE"))
+    }
+
     /// The controller's health log, newest first. `minimumLevel` is info, warning or error.
     public func health(minimumLevel: String = "info", limit: Int = 100) async throws -> [HealthEntry] {
         try decode(HealthList.self, from: await request("v1/health?level=\(minimumLevel)&limit=\(limit)")).entries

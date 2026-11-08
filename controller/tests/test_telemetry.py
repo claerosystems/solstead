@@ -182,3 +182,23 @@ def test_clock_synchronized_uses_timesyncd_marker(tmp_path):
     assert not clock_synchronized(marker)
     marker.touch()
     assert clock_synchronized(marker)
+
+
+def test_charger_fields_and_daily_energy(tmp_path):
+    clocks = Clocks(NOON)
+    telemetry = make(tmp_path, clocks)
+    for _ in range(120):  # two hours: 60 W of solar, 10 W of load
+        for volts in (12.6, 12.8):
+            telemetry.add(
+                battery_v=volts, battery_a=4.0, solar_w=60, load_w=10.0, charge_state="bulk"
+            )
+            clocks.advance(30)
+        telemetry.tick()
+    history = telemetry.history("24h")
+    point = history["points"][-1]
+    assert point["battery_v"] == 12.7 and point["battery_v_min"] == 12.6
+    assert point["charge_state"] == "bulk"
+    [day] = history["energy"]
+    assert day["solar_wh"] == pytest.approx(119, abs=1)  # the last minute is still open
+    assert day["load_wh"] == pytest.approx(19.8, abs=0.2)
+    assert make(tmp_path / "empty", Clocks(NOON)).history("24h")["energy"] == []

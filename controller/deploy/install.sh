@@ -19,7 +19,9 @@ mkdir -p "$PREFIX" "$ETC" "$STORAGE"
 
 python3 -m venv "$PREFIX/venv"
 "$PREFIX/venv/bin/pip" install --quiet --upgrade pip
-"$PREFIX/venv/bin/pip" install --quiet --upgrade "$HERE"
+"$PREFIX/venv/bin/pip" install --quiet --upgrade "$HERE[ble]"
+# Bluetooth reads the Victron solar charger; Raspberry Pi images may ship with it switched off.
+rfkill unblock bluetooth 2>/dev/null || true
 
 if [ ! -f "$ETC/config.json" ]; then
   "$PREFIX/venv/bin/solstead" provision --dir "$ETC" --hostname "$HOSTNAME_FQDN" --storage "$STORAGE" \

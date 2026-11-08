@@ -328,3 +328,33 @@ def test_telemetry_history_and_retention(api, config):
     assert json.loads(config.telemetry_settings_path.read_text()) == {"retention_days": 90}
     _, body = call(api, "GET", "/v1/status")
     assert json.loads(body)["telemetry"]["retention_days"] == 90
+
+
+def test_charger_endpoints(api, config):
+    from tests.test_victron import ADDRESS, KEY, OTHER_KEY, broadcast, plain
+
+    response, body = call(api, "GET", "/v1/charger")
+    assert response.status == 200 and json.loads(body)["configured"] is False
+    api.controller.charger.handle(ADDRESS, "SmartSolar", -60, broadcast(plain()))
+    status = json.loads(call(api, "GET", "/v1/charger")[1])
+    assert status["seen"][0]["address"] == ADDRESS
+
+    def put(payload):
+        conn = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=5)
+        conn.request("PUT", "/v1/charger", body=json.dumps(payload),
+                     headers={"Authorization": "Bearer " + TOKEN})  # fmt: skip
+        response = conn.getresponse()
+        result = response.status, json.loads(response.read())
+        conn.close()
+        return result
+
+    code, result = put({"address": ADDRESS, "key": OTHER_KEY.hex()})
+    assert code == 400 and "does not match" in result["error"]
+    code, result = put({"address": ADDRESS, "key": "short"})
+    assert code == 400
+    code, result = put({"address": ADDRESS, "key": KEY.hex()})
+    assert code == 200 and result["configured"] and result["reading"]["battery_v"] == 12.77
+    assert KEY.hex() not in json.dumps(result)
+    assert json.loads(config.charger_settings_path.read_text())["address"] == ADDRESS
+    response, body = call(api, "DELETE", "/v1/charger")
+    assert response.status == 200 and json.loads(body)["configured"] is False

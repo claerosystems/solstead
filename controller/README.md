@@ -156,6 +156,14 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   75 °C is logged as a warning and 80 °C as an error; under-voltage and throttling are logged
   when they begin and end. The status carries a `thermal` block with the reading, thresholds,
   flags and a good/warning/danger level.
+- **Solar charger.** With the `ble` extra (bleak) the controller listens for Victron Instant
+  Readout broadcasts over BlueZ; no pairing or PIN is involved. Once the owner picks their
+  charger and gives its advertisement key (`PUT /v1/charger`, kept in `charger.json` beside
+  `config.json`, mode 0600), every 10 s the latest reading adds battery voltage and current,
+  solar watts, load-output watts and charge state to telemetry, and telemetry history gains daily
+  harvested and used watt-hours. The health log records the charger going quiet for 5 minutes,
+  charger errors, and the battery falling below 12.0 V (cleared above 12.6 V). If the Pi's
+  Bluetooth is switched off, `rfkill unblock bluetooth` turns it on.
 - **Health log.** `GET /v1/health?level=info|warning|error&limit=N` returns incidents newest
   first (start, recording started/stopped, camera stream restarts, camera errors and recovery,
   storage lost/returned, events recorded, live view, time-lapse errors). The status carries a
@@ -233,6 +241,9 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `POST /v1/live?quality=low` | Start or keep live view (`low` or `high`); returns when playable, with the playlist path. |
 | `GET /v1/live/index.m3u8`, `GET /v1/live/{segment}` | The HLS playlist, `init.mp4` and `seg_NNNNN.m4s` segments. Each fetch keeps the stream alive. |
 | `DELETE /v1/live` | Stop live view now. |
+| `GET /v1/charger` | The Victron solar charger in use (`configured`, `name`, `address`, `scanning`, `error`, `key_mismatch`, latest `reading`) and `seen`: Victron devices heard in the last ten minutes. The key is never returned. |
+| `PUT /v1/charger` | Read this charger from now on: `{"address", "key"}` with its 32-character Instant Readout key. 400 unless the key decrypts a broadcast heard from that address. |
+| `DELETE /v1/charger` | Stop reading the charger and delete its key. |
 
 Errors: 401 without a valid token, 404 unknown route, 503 with `{"error": "…"}` when the camera or
 storage is unavailable.

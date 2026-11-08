@@ -15,7 +15,9 @@ HOST="${SOLSTEAD_HOSTNAME:-$(hostname).local}"
 for tool in python3 ffmpeg openssl; do command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }; done
 [ -d "$HERE/.venv" ] || python3 -m venv "$HERE/.venv"
 "$HERE/.venv/bin/pip" install --quiet --upgrade pip
-"$HERE/.venv/bin/pip" install --quiet -e "$HERE"
+# The ble extra reads a Victron solar charger over Bluetooth. If the Pi's Bluetooth is
+# switched off, `rfkill unblock bluetooth` turns it on (no root needed on Raspberry Pi OS).
+"$HERE/.venv/bin/pip" install --quiet -e "$HERE[ble]"
 
 mkdir -p "$ETC"
 chmod 700 "$ETC"
