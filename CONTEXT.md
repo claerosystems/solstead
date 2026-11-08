@@ -77,3 +77,7 @@ _Avoid_: Health log, metrics, stats
 **Health log**:
 The record of notable incidents on the controller, such as a camera lost, storage returned, or under-voltage, each written when it happens.
 _Avoid_: Telemetry, event (an event is a motion recording)
+
+**Stream buffer**:
+The last several seconds of camera footage the controller keeps continuously, so an event clip can begin before the detected activity and a manual recording can capture the moments just before the owner asked for it.
+_Avoid_: Pre-roll, cache
