@@ -46,6 +46,8 @@ public struct ControllerStatus: Decodable, Equatable, Sendable {
     public let encryption: EncryptionStatus?
     public let telemetry: TelemetryStatus?
     public let charger: ChargerStatus?
+    /// Absent from controllers older than the one that added uplink reporting.
+    public let network: NetworkStatus?
     public let recordingMode: String
     public let remoteAccess: Bool
 }

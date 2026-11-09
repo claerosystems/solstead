@@ -17,6 +17,7 @@ from .events import Event, EventRecorder, EventStore
 from .health import HealthLog
 from .live import LiveStream
 from .motion import MotionWatcher
+from .network import Network, read_network
 from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
@@ -35,6 +36,7 @@ RETRY_SECONDS = 30
 STORAGE_CHECK_SECONDS = 5
 THERMAL_CHECK_SECONDS = 10
 CHARGER_CHECK_SECONDS = 10
+NETWORK_CHECK_SECONDS = 30
 CHARGER_FRESH_SECONDS = 30  # an older reading is not added to telemetry
 CHARGER_LOST_SECONDS = 300
 # 12 V battery: warn below LOW, all clear again above RECOVERED (both lead-acid and LiFePO4 are
@@ -127,11 +129,14 @@ class Controller:
         self._last_storage_check = 0.0
         self._last_thermal_check = 0.0
         self._last_charger_check = 0.0
+        self._last_network_check = 0.0
         self._charger_heard = False
         self._battery_low = False
         self._charger_error = 0
         self.thermal = Thermal(temperature_c=None)
         self.thermal_reader = read_thermal
+        self.network = Network(uplink=None, interface=None)
+        self.network_reader = read_network
         self._seen: dict = {
             "buffer_restarts": 0,
             "watcher_errors": 0,
@@ -181,6 +186,7 @@ class Controller:
             self._check_storage()
             self._check_thermal()
             self._check_charger()
+            self._check_network()
             self.telemetry.tick()
             if self.config.events_enabled:
                 self._ensure_events()
@@ -230,6 +236,23 @@ class Controller:
             self.health.record("info", "storage", "Recording storage is back")
             self.events_reason = None
             self._last_attempt = 0.0  # retry immediately
+
+    def _check_network(self) -> None:
+        """Read the uplink and radio signal; log when the uplink changes."""
+        if time.monotonic() - self._last_network_check < NETWORK_CHECK_SECONDS:
+            return
+        first = self._last_network_check == 0.0
+        self._last_network_check = time.monotonic()
+        before, now = self.network, self.network_reader()
+        self.network = now
+        if first or now.uplink == before.uplink:
+            return
+        names = {"wifi": "Wi-Fi", "cellular": "cellular", "ethernet": "Ethernet"}
+        if now.uplink is None:
+            self.health.record("warning", "network", "No internet connection")
+        else:
+            name = names.get(now.uplink, now.interface or now.uplink)
+            self.health.record("info", "network", f"Connected over {name}", interface=now.interface)
 
     def _check_thermal(self) -> None:
         """Read temperature and Pi power flags; log when they cross into or out of trouble."""
@@ -463,6 +486,7 @@ class Controller:
             "encryption": self.encryption_status(),
             "telemetry": self.telemetry.status(),
             "charger": self.charger.status(),
+            "network": self.network.to_dict(),
             "health": {
                 "clock_ok": clock_ok(),
                 "last_day": self.health.counts(int(time.time()) - 86400),

@@ -54,6 +54,7 @@ struct ContentView: View {
                     Button("Settings", systemImage: "gearshape") { model.showSettings = true }
                 }
             }
+            .modifier(TitleWithUplink(network: model.isConnected ? model.status?.network : nil))
         }
         .overlay {
             if let activity = model.activity {
@@ -62,6 +63,58 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.activity != nil)
+    }
+}
+
+/// Puts the controller's uplink icon beside the large "Solstead" title (iOS 26), or in the
+/// top bar on older systems.
+struct TitleWithUplink: ViewModifier {
+    let network: NetworkStatus?
+
+    func body(content: Content) -> some View {
+        if let network {
+            if #available(iOS 26, *) {
+                content.toolbar {
+                    ToolbarItem(placement: .largeTitle) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text("Solstead").font(.largeTitle.bold())
+                            UplinkIcon(network: network).font(.title3)
+                            Spacer()
+                        }
+                    }
+                }
+            } else {
+                content.toolbar {
+                    ToolbarItem(placement: .principal) { UplinkIcon(network: network) }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// The controller's uplink drawn with its signal: Wi-Fi arcs or cellular bars.
+struct UplinkIcon: View {
+    let network: NetworkStatus
+
+    var body: some View {
+        let percent = network.uplinkSignalPercent
+        Image(systemName: network.symbolName, variableValue: percent.map { Double($0) / 100 })
+            .foregroundStyle(colour(percent))
+            .accessibilityLabel(accessibilityText(percent))
+    }
+
+    private func colour(_ percent: Int?) -> Color {
+        if network.uplink == nil { return .red }
+        if let percent, percent < 30 { return .orange }
+        return .secondary
+    }
+
+    private func accessibilityText(_ percent: Int?) -> String {
+        guard network.uplink != nil else { return "Controller has no internet connection" }
+        let signal = percent.map { ", \(NetworkStatus.strength($0).lowercased()) signal" } ?? ""
+        return "Controller on \(network.uplinkName)\(signal)"
     }
 }
 
@@ -294,6 +347,28 @@ struct PairingSection: View {
     }
 }
 
+/// The controller's uplink and the signal of each radio it has.
+struct NetworkRows: View {
+    let network: NetworkStatus
+
+    var body: some View {
+        LabeledContent("Connection") {
+            Label { Text(network.uplinkName) } icon: { UplinkIcon(network: network) }
+                .labelStyle(.titleAndIcon)
+        }
+        .foregroundStyle(network.uplink == nil ? .red : .primary)
+        if let wifi = network.wifi {
+            LabeledContent(network.uplink == .wifi ? "Wi-Fi signal" : "Wi-Fi signal (standby)",
+                           value: NetworkStatus.describe(percent: wifi.signalPercent, dbm: wifi.signalDbm))
+        }
+        if let cell = network.cellular {
+            LabeledContent(network.uplink == .cellular ? "Cellular signal" : "Cellular signal (standby)",
+                           value: NetworkStatus.describe(percent: cell.signalPercent)
+                               + (cell.operator.map { ", \($0)" } ?? ""))
+        }
+    }
+}
+
 struct HealthSection: View {
     @EnvironmentObject private var model: ControllerModel
     let status: ControllerStatus
@@ -367,6 +442,9 @@ struct HealthSection: View {
                 LabeledContent("Camera", value: status.camera.configured ? "Configured" : "Not configured")
                 if let last = status.camera.lastSuccessUnix {
                     LabeledContent("Last capture", value: Date(timeIntervalSince1970: TimeInterval(last)).formatted(date: .abbreviated, time: .shortened))
+                }
+                if let network = status.network {
+                    NetworkRows(network: network)
                 }
                 LabeledContent("Remote access", value: status.remoteAccess ? "On" : "Off (local network only)")
                 if let health = status.health {
