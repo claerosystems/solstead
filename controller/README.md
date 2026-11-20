@@ -22,6 +22,8 @@ The service that runs on the Raspberry Pi inside the controller. The standard li
 | `solstead/timelapse.py` | Scheduled frames in their own allocation (sealed per frame when keys are enrolled), day listing, MP4 export of plain days, owner-adjustable settings. |
 | `solstead/health.py` | Health log: incidents in memory and in `<storage>/health.jsonl`, capped. |
 | `solstead/sdnotify.py` | systemd readiness and watchdog pings without a dependency. |
+| `solstead/network.py` | Reads the active uplink (lowest-metric default route) and Wi-Fi and modem signal. |
+| `solstead/uplink.py` | The owner's preferred uplink, applied as NetworkManager route metrics (`uplink.json`). |
 | `solstead/thermal.py` | CPU temperature against the Pi 4's throttle points and its under-voltage/throttle flags. |
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
@@ -164,6 +166,17 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   harvested and used watt-hours. The health log records the charger going quiet for 5 minutes,
   charger errors, and the battery falling below 12.0 V (cleared above 12.6 V). If the Pi's
   Bluetooth is switched off, `rfkill unblock bluetooth` turns it on.
+- **Preferred link.** With both Wi-Fi and cellular set up, the owner picks which one carries
+  traffic (`PUT /v1/network {"preferred": "wifi"|"cellular"}`). Both stay connected: the
+  controller sets `ipv4.route-metric` to 600 on the preferred link's NetworkManager profiles
+  (every Wi-Fi profile, or `solstead-cellular`) and 700 on the other's, then runs
+  `nmcli device reapply` so the change takes effect without dropping either link. If the
+  preferred link disconnects, NetworkManager withdraws its route and traffic moves to the other
+  by itself. The metrics live in the profiles, so they hold across reboots; the choice is also
+  kept in `uplink.json` beside `config.json` and re-applied at start in case a profile was added
+  since. Until the owner picks, NetworkManager's defaults (Wi-Fi first) are left alone. Ethernet
+  (100) still wins on the bench. The controller needs polkit permission for this, which
+  `deploy/cellular.sh` installs.
 - **Health log.** `GET /v1/health?level=info|warning|error&limit=N` returns incidents newest
   first (start, recording started/stopped, camera stream restarts, camera errors and recovery,
   storage lost/returned, events recorded, live view, time-lapse errors). The status carries a
@@ -205,6 +218,7 @@ The bench fake camera is an MPEG-TS stream over HTTP; real cameras use `rtsp://`
 | `live_path` | `/dev/shm/solstead-live` | Where live segments are written; should be RAM. |
 | `buffer_path` | `/dev/shm/solstead-buffer` | Pre-event buffer and clip assembly; must be RAM so plaintext never reaches the SSD. |
 | `recipients_path` | `recipients.json` beside `config.json` | Enrolled public keys recordings are sealed to. |
+| `uplink_settings_path` | `uplink.json` beside `config.json` | The owner's preferred uplink. |
 | `clip_seconds` | `10` | Length of a manual test clip. |
 | `snapshot_width` | `960` | Snapshot width in pixels; height keeps the aspect ratio. |
 | `min_free_bytes` | 2 GiB | Recording pauses below this much free space. |
@@ -231,6 +245,8 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events, unencrypted_frames}`. Also in the status as `encryption`. |
 | `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
 | `DELETE /v1/encryption` | Turn encryption off: forget the enrolled keys so new recordings are stored unencrypted. Clips already sealed stay sealed. |
+| `GET /v1/network` | The `network` block of the status: `uplink` (`wifi`, `cellular`, `ethernet`, `other` or null) and its `interface`, `wifi` and `cellular` signal, `preferred` (`wifi` or `cellular`), and `fallback`/`fallback_reason` (traffic left the preferred link because it failed). |
+| `PUT /v1/network` | `{"preferred": "wifi"\|"cellular"}`: make that link carry traffic while the other stands by. Returns the network block, re-read after the change. 400 for another value, 409 if that link has no NetworkManager connection, 503 if NetworkManager refuses or is missing. |
 | `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames (`date`, `frames`, `bytes`, `encrypted_frames`). |
 | `PUT /v1/timelapse` | Change `enabled`, `interval_seconds`, `window` (and `width`, `allocation_bytes`, `export_fps`); JSON body. |
 | `GET /v1/timelapse/{date}` | That day's frames (`day`, `name`, `unix`, `size_bytes`, `encrypted`). |

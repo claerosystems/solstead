@@ -18,6 +18,7 @@ from .recipients import RecipientsError
 from .sealing import MAX_HEADER, SealingError
 from .telemetry import TelemetryError
 from .timelapse import TimeLapseError, TimeLapseSealed
+from .uplink import NetworkManagerError, NoProfile, UplinkError
 from .victron import ChargerError
 
 JSON = "application/json"
@@ -174,6 +175,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, controller.choose_charger(self.read_json()))
             if self.command == "DELETE" and path == "/v1/charger":
                 return self.reply(200, controller.forget_charger())
+            if get and path == "/v1/network":
+                return self.reply(200, controller.network_status())
+            if self.command == "PUT" and path == "/v1/network":
+                return self.reply(200, controller.set_network(self.read_json()))
             if get and path == "/v1/timelapse":
                 return self.reply(
                     200, {**controller.timelapse.status(), "days": controller.timelapse.days()}
@@ -261,8 +266,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "Event not found"})
                 return self.send_file(found[1], SEALED if found[0].encrypted else "video/mp4")
             return self.reply(404, {"error": "Not found"})
+        except NoProfile as error:
+            return self.reply(409, {"error": str(error)})
+        except NetworkManagerError as error:
+            return self.reply(503, {"error": str(error)})
         except (
             TimeLapseError,
+            UplinkError,
             RecipientsError,
             SealingError,
             TelemetryError,

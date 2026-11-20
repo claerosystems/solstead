@@ -27,6 +27,7 @@ from .storage import Storage, StorageUnavailable, ram_folder
 from .telemetry import Telemetry
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
+from .uplink import NetworkManagerError, Uplink
 from .victron import Charger
 
 LEGACY_BUFFER_FOLDER = "buffer"  # the pre-event buffer lived on the SSD before it moved to RAM
@@ -74,6 +75,7 @@ class Controller:
         live: LiveStream | None = None,
         timelapse: TimeLapse | None = None,
         charger: Charger | None = None,
+        uplink: Uplink | None = None,
     ):
         self.config = config
         self.storage = storage or Storage(
@@ -137,6 +139,7 @@ class Controller:
         self.thermal_reader = read_thermal
         self.network = Network(uplink=None, interface=None)
         self.network_reader = read_network
+        self.uplink = uplink or Uplink(config.uplink_settings_path)
         self._seen: dict = {
             "buffer_restarts": 0,
             "watcher_errors": 0,
@@ -170,6 +173,17 @@ class Controller:
         self._thread = threading.Thread(target=self._loop, name="controller", daemon=True)
         self._thread.start()
         self.charger.start()
+        self._apply_uplink()
+
+    def _apply_uplink(self) -> None:
+        """Make sure the NetworkManager profiles match the owner's preferred link; a profile
+        added since (a new Wi-Fi network, say) starts with NetworkManager's default metric."""
+        try:
+            if self.uplink.apply():
+                name = "Wi-Fi" if self.uplink.preferred == "wifi" else "cellular"
+                self.health.record("info", "network", f"Route metrics reset to prefer {name}")
+        except NetworkManagerError as error:
+            self.health.record("warning", "network", f"Could not apply preferred link: {error}")
 
     def stop(self) -> None:
         self._stop.set()
@@ -253,6 +267,18 @@ class Controller:
         else:
             name = names.get(now.uplink, now.interface or now.uplink)
             self.health.record("info", "network", f"Connected over {name}", interface=now.interface)
+
+    def network_status(self) -> dict:
+        return {**self.network.to_dict(), **self.uplink.status()}
+
+    def set_network(self, changes: dict) -> dict:
+        """The owner picked the link to use while it works; the other stays up as fallback."""
+        preferred = changes.get("preferred")
+        if self.uplink.set_preferred(preferred):
+            name = "Wi-Fi" if preferred == "wifi" else "cellular"
+            self.health.record("info", "network", f"Owner set {name} as the preferred link")
+        self.network = self.network_reader()
+        return self.network_status()
 
     def _check_thermal(self) -> None:
         """Read temperature and Pi power flags; log when they cross into or out of trouble."""
@@ -486,7 +512,7 @@ class Controller:
             "encryption": self.encryption_status(),
             "telemetry": self.telemetry.status(),
             "charger": self.charger.status(),
-            "network": self.network.to_dict(),
+            "network": self.network_status(),
             "health": {
                 "clock_ok": clock_ok(),
                 "last_day": self.health.counts(int(time.time()) - 86400),
