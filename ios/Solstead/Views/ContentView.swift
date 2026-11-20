@@ -189,6 +189,9 @@ struct SettingsView: View {
                 if let charger = model.charger {
                     ChargerSettingsSection(charger: charger)
                 }
+                if let network = model.network, network.supportsPreference {
+                    NetworkSettingsSection(network: network)
+                }
                 if let telemetry = model.telemetry {
                     TelemetrySettingsSection(telemetry: telemetry)
                 }
@@ -357,6 +360,12 @@ struct NetworkRows: View {
                 .labelStyle(.titleAndIcon)
         }
         .foregroundStyle(network.uplink == nil ? .red : .primary)
+        if let note = network.fallbackNote {
+            Label(note, systemImage: "arrow.triangle.branch").foregroundStyle(.orange)
+        }
+        if let preferred = network.preferred {
+            LabeledContent("Preferred", value: preferred.name)
+        }
         if let wifi = network.wifi {
             LabeledContent(network.uplink == .wifi ? "Wi-Fi signal" : "Wi-Fi signal (standby)",
                            value: NetworkStatus.describe(percent: wifi.signalPercent, dbm: wifi.signalDbm))
@@ -365,6 +374,49 @@ struct NetworkRows: View {
             LabeledContent(network.uplink == .cellular ? "Cellular signal" : "Cellular signal (standby)",
                            value: NetworkStatus.describe(percent: cell.signalPercent)
                                + (cell.operator.map { ", \($0)" } ?? ""))
+        }
+    }
+}
+
+/// Settings: which link the controller prefers, with the one it is using now.
+struct NetworkSettingsSection: View {
+    @EnvironmentObject private var model: ControllerModel
+    let network: NetworkStatus
+
+    var body: some View {
+        Section {
+            Picker("Prefer", selection: Binding(
+                get: { network.preferred ?? .wifi },
+                set: { choice in
+                    guard choice != network.preferred else { return }
+                    Task { await model.setPreferredUplink(choice) }
+                }
+            )) {
+                ForEach(NetworkStatus.Preference.allCases, id: \.self) { preference in
+                    Text(preference.name).tag(preference)
+                }
+            }
+            .pickerStyle(.segmented)
+            LabeledContent("Using now") {
+                Label { Text(network.uplinkName) } icon: { UplinkIcon(network: network) }
+                    .labelStyle(.titleAndIcon)
+            }
+            .foregroundStyle(network.uplink == nil ? .red : .primary)
+            if let note = network.fallbackNote {
+                Label(note, systemImage: "arrow.triangle.branch").foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Internet connection")
+        } footer: {
+            Text(Self.footer(for: network.preferred ?? .wifi))
+        }
+    }
+
+    static func footer(for preference: NetworkStatus.Preference) -> String {
+        let fallback = "If it has no internet, the controller switches to the other link and comes back once it works again."
+        switch preference {
+        case .wifi: return "Uses Wi-Fi. " + fallback
+        case .cellular: return "Uses cellular, which counts against your data plan. " + fallback
         }
     }
 }
