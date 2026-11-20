@@ -12,7 +12,7 @@ HOSTNAME_FQDN="${SOLSTEAD_HOSTNAME:-$(hostname).local}"
 if [ "$(id -u)" -ne 0 ]; then echo "run as root (sudo)" >&2; exit 1; fi
 
 apt-get update -qq
-apt-get install -y -qq ffmpeg python3 python3-venv openssl
+apt-get install -y -qq ffmpeg python3 python3-venv openssl iputils-ping
 
 id solstead >/dev/null 2>&1 || useradd --system --home "$PREFIX" --shell /usr/sbin/nologin solstead
 mkdir -p "$PREFIX" "$ETC" "$STORAGE"

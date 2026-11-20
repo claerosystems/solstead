@@ -17,7 +17,7 @@ from .events import Event, EventRecorder, EventStore
 from .health import HealthLog
 from .live import LiveStream
 from .motion import MotionWatcher
-from .network import Network, read_network
+from .network import Failover, Network, read_network, read_routes
 from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
@@ -137,6 +137,9 @@ class Controller:
         self.thermal_reader = read_thermal
         self.network = Network(uplink=None, interface=None)
         self.network_reader = read_network
+        self.failover = Failover(self.health.record)
+        self.routes_reader = read_routes
+        self._failover_thread: threading.Thread | None = None
         self._seen: dict = {
             "buffer_restarts": 0,
             "watcher_errors": 0,
@@ -169,6 +172,10 @@ class Controller:
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="controller", daemon=True)
         self._thread.start()
+        self._failover_thread = threading.Thread(
+            target=self._failover_loop, name="failover", daemon=True
+        )
+        self._failover_thread.start()
         self.charger.start()
 
     def stop(self) -> None:
@@ -176,6 +183,9 @@ class Controller:
         if self._thread:
             self._thread.join(5)
             self._thread = None
+        if self._failover_thread:
+            self._failover_thread.join(5)
+            self._failover_thread = None
         self.charger.stop()
         self._stop_events()
         self.live.stop()
@@ -253,6 +263,14 @@ class Controller:
         else:
             name = names.get(now.uplink, now.interface or now.uplink)
             self.health.record("info", "network", f"Connected over {name}", interface=now.interface)
+
+    def _failover_loop(self) -> None:
+        """Ping through the links on a thread of its own so a slow ping never delays recording."""
+        while not self._stop.wait(NETWORK_CHECK_SECONDS):
+            try:
+                self.failover.check(self.routes_reader())
+            except Exception:  # keep checking; the next round may succeed
+                log.exception("Failover check failed")
 
     def _check_thermal(self) -> None:
         """Read temperature and Pi power flags; log when they cross into or out of trouble."""
