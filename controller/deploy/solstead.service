@@ -21,7 +21,8 @@ ProtectHome=true
 ReadWritePaths=/mnt/solstead
 ProtectKernelTunables=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK: `ip route` reads the default routes for the uplink and failover.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target

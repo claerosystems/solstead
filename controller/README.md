@@ -22,6 +22,7 @@ The service that runs on the Raspberry Pi inside the controller. The standard li
 | `solstead/timelapse.py` | Scheduled frames in their own allocation (sealed per frame when keys are enrolled), day listing, MP4 export of plain days, owner-adjustable settings. |
 | `solstead/health.py` | Health log: incidents in memory and in `<storage>/health.jsonl`, capped. |
 | `solstead/sdnotify.py` | systemd readiness and watchdog pings without a dependency. |
+| `solstead/network.py` | The uplink and radio signal, and failover off a link that stops passing traffic. |
 | `solstead/thermal.py` | CPU temperature against the Pi 4's throttle points and its under-voltage/throttle flags. |
 | `solstead/api.py` | The HTTP handler: bearer-token auth and the `/v1` routes. |
 | `solstead/server.py` | TLS 1.2+ server around the handler. |
@@ -164,6 +165,19 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   harvested and used watt-hours. The health log records the charger going quiet for 5 minutes,
   charger errors, and the battery falling below 12.0 V (cleared above 12.6 V). If the Pi's
   Bluetooth is switched off, `rfkill unblock bluetooth` turns it on.
+- **Internet fallback.** Losing a link outright (Wi-Fi drops its access point, the modem
+  detaches) already moves traffic to the other default route. Every 30 s, on its own thread,
+  the controller also pings 1.1.1.1 (then 8.8.8.8) through the preferred link, the default route
+  with the lowest metric, so a link that stays up without reaching the internet is caught too.
+  After two missed checks in a row, if another link answers, it raises the preferred link's
+  metric to 2000 with `nmcli device modify` (running settings only, never the saved profile) and
+  logs a warning. It keeps pinging the set-aside link and, after four good checks in a row,
+  restores the profile's metric with `nmcli device reapply` and logs that. Any metric of 2000 or
+  more counts as set aside, so a restart mid-fallback carries on from the route table. Only the
+  preferred link is pinged while it works, so healthy Wi-Fi spends no cellular data. Needs
+  `ping` (iputils-ping), unprivileged ICMP (`net.ipv4.ping_group_range`, open on Raspberry Pi
+  OS) and polkit permission for the controller user to use NetworkManager's network control.
+  Only applies when there are two default routes. A refused `nmcli` is logged once as an error.
 - **Health log.** `GET /v1/health?level=info|warning|error&limit=N` returns incidents newest
   first (start, recording started/stopped, camera stream restarts, camera errors and recovery,
   storage lost/returned, events recorded, live view, time-lapse errors). The status carries a
