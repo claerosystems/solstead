@@ -102,6 +102,7 @@ def make(tmp_path, found, settings=None):
     verifier = MotionVerifier("rtsp://cam/sub", gate, settings or MotionSettings(),
                               clock=lambda: clock[0], recognizer=rec)  # fmt: skip
     verifier.worker._thread = object()  # process submissions synchronously in the test
+    gate.motion(True, clock[0])  # the camera reports motion, so recognition may run
     return verifier, clock
 
 
@@ -166,3 +167,13 @@ def test_recognition_runs_on_a_real_thread(tmp_path):
         time.sleep(0.01)
     worker.stop()
     assert results and results[0][0].kind == "person"
+
+
+def test_recognition_waits_for_the_camera(tmp_path):
+    verifier, clock = make(tmp_path, [(1, 0.9, (0.1, 0.1, 0.9, 0.9))])
+    frame = np.zeros((H * 2, W * 2, 3), np.uint8)
+    verifier.gate.motion(False, clock[0])
+    clock[0] += 30  # long after the camera's report
+    verifier.decide(True, frame, clock[0])
+    verifier.worker.run_once()
+    assert verifier.worker.runs == 0 and verifier.recognized_at is None

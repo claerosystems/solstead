@@ -268,6 +268,11 @@ class MotionGate:
             elif self.checking(now):
                 self._evaluate(now)
 
+    def camera_window(self, now: float | None = None) -> bool:
+        """The camera is reporting motion now, or stopped only moments ago."""
+        with self._lock:
+            return self._window_open(self.clock() if now is None else now)
+
     def _window_open(self, now: float) -> bool:
         if self.camera_last is None:
             return False
@@ -460,7 +465,9 @@ class MotionVerifier:
         """Whether this frame confirms motion: filters alone, or filters plus recognition."""
         if not self.recognizing:
             return moving, now, None
-        if moving:
+        # Recognition is the costly step: run it only while the camera itself reports motion,
+        # not for every movement the checker sees (trees, traffic outside the areas, rain).
+        if moving and self.gate.camera_window(now):
             self.worker.submit(full.copy(), now)
         recent = self.recognized_at is not None and now - self.recognized_at <= (
             RECOGNITION_HOLD_SECONDS
