@@ -169,15 +169,18 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   detaches) already moves traffic to the other default route. Every 30 s, on its own thread,
   the controller also pings 1.1.1.1 (then 8.8.8.8) through the preferred link, the default route
   with the lowest metric, so a link that stays up without reaching the internet is caught too.
-  After two missed checks in a row, if another link answers, it raises the preferred link's
-  metric to 2000 with `nmcli device modify` (running settings only, never the saved profile) and
-  logs a warning. It keeps pinging the set-aside link and, after four good checks in a row,
-  restores the profile's metric with `nmcli device reapply` and logs that. Any metric of 2000 or
-  more counts as set aside, so a restart mid-fallback carries on from the route table. Only the
-  preferred link is pinged while it works, so healthy Wi-Fi spends no cellular data. Needs
-  `ping` (iputils-ping), unprivileged ICMP (`net.ipv4.ping_group_range`, open on Raspberry Pi
-  OS) and polkit permission for the controller user to use NetworkManager's network control.
-  Only applies when there are two default routes. A refused `nmcli` is logged once as an error.
+  After two missed checks in a row, if another link answers, traffic moves with `nmcli device
+  modify` (running settings only, never the saved profile): a failing Wi-Fi or Ethernet link is
+  lowered to metric 2000, while for failing cellular the working Wi-Fi link is raised to metric 50
+  instead, because reapplying the modem device drops its address and route. A warning is logged.
+  The controller keeps pinging the set-aside link and, after four good checks in a row, restores
+  the profile's metric with `nmcli device reapply` and logs that. Both marker metrics live only in
+  the route table, so a restart mid-fallback carries on. Only the preferred link is pinged while it
+  works, so healthy Wi-Fi spends no cellular data. Separately, a modem ModemManager calls connected
+  whose interface has had no default route for two minutes is reconnected with `nmcli connection
+  up` (at most every ten minutes) and logged. Needs `ping` (iputils-ping), unprivileged ICMP
+  (`net.ipv4.ping_group_range`, open on Raspberry Pi OS) and polkit permission for the controller
+  user to use NetworkManager (installed by `deploy/cellular.sh`). A refused `nmcli` is logged once.
 - **Health log.** `GET /v1/health?level=info|warning|error&limit=N` returns incidents newest
   first (start, recording started/stopped, camera stream restarts, camera errors and recovery,
   storage lost/returned, events recorded, live view, time-lapse errors). The status carries a

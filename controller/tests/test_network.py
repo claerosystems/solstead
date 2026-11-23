@@ -4,7 +4,9 @@ import subprocess
 from solstead.network import (
     DEMOTED_METRIC,
     FAIL_CHECKS,
+    PROMOTED_METRIC,
     RECOVER_CHECKS,
+    STRANDED_CHECKS,
     Failover,
     Route,
     kind_of,
@@ -105,7 +107,8 @@ class Links:
         if args[0] == "ping":
             code = 0 if args[args.index("-I") + 1] in self.up else 1
             return subprocess.CompletedProcess(args, code, "", "")
-        return subprocess.CompletedProcess(args, self.nmcli_code, "", self.nmcli_error)
+        out = "1111-aaaa:802-11-wireless\n2222-bbbb:gsm\n" if "UUID,TYPE" in args else ""
+        return subprocess.CompletedProcess(args, self.nmcli_code, out, self.nmcli_error)
 
     def pinged(self):
         return [c[c.index("-I") + 1] for c in self.calls if c[0] == "ping"]
@@ -231,3 +234,66 @@ def test_restart_during_fallback_picks_up_from_the_route_table():
     failover = Failover(Health(), Links(up={"wwan0"}), hosts=("1.1.1.1",))
     failover.check(WIFI_DEMOTED)
     assert failover.fallback and failover.fallback_reason == "Wi-Fi is not passing traffic"
+
+
+CELLULAR_FIRST = [Route("wwan0", 600), Route("wlan0", 700)]
+WIFI_PROMOTED = [Route("wlan0", PROMOTED_METRIC), Route("wwan0", 600)]
+
+
+def test_failing_cellular_is_never_modified_wifi_is_raised_instead():
+    links, health = Links(up={"wlan0"}), Health()
+    failover = Failover(health, links, hosts=("1.1.1.1",))
+    for _ in range(FAIL_CHECKS):
+        failover.check(CELLULAR_FIRST)
+    assert links.nmcli() == [
+        ["device", "modify", "wlan0", "ipv4.route-metric", str(PROMOTED_METRIC)]
+    ]
+    assert health.entries == [
+        ("warning", "cellular stopped passing traffic; switched to Wi-Fi until it recovers")
+    ]
+    assert failover.fallback
+
+    # A restarted controller sees the raised Wi-Fi and keeps probing cellular.
+    failover = Failover(health, links, hosts=("1.1.1.1",))
+    failover.check(WIFI_PROMOTED)
+    assert failover.fallback and failover.fallback_reason == "cellular is not passing traffic"
+    links.up.add("wwan0")
+    for _ in range(RECOVER_CHECKS):
+        failover.check(WIFI_PROMOTED)
+    assert links.nmcli()[-1] == ["device", "reapply", "wlan0"]
+    assert health.entries[-1] == ("info", "cellular is passing traffic again; switched back to it")
+    assert not any("wwan0" in call for call in links.nmcli())
+
+
+def test_cellular_preferred_with_only_another_modem_stays_put():
+    links = Links(up={"wwan1"})
+    failover = Failover(Health(), links, hosts=("1.1.1.1",))
+    for _ in range(FAIL_CHECKS + 1):
+        failover.check([Route("wwan0", 600), Route("wwan1", 700)])
+    assert links.nmcli() == []
+
+
+def test_connected_modem_without_a_route_is_reconnected():
+    now = [0.0]
+    links, health = Links(), Health()
+    failover = Failover(health, links, hosts=("1.1.1.1",), clock=lambda: now[0])
+    wifi_only = [Route("wlan0", 600)]
+    for _ in range(STRANDED_CHECKS - 1):
+        failover.check(wifi_only, modem_connected=True)
+    assert links.nmcli() == []
+    failover.check(wifi_only, modem_connected=True)
+    assert links.nmcli()[-1] == ["connection", "up", "2222-bbbb"]
+    assert health.entries == [
+        ("warning", "Cellular is connected but has no route; reconnecting it")
+    ]
+
+    calls = len(links.nmcli())
+    failover.check(wifi_only, modem_connected=True)  # not again within ten minutes
+    assert len(links.nmcli()) == calls
+    now[0] = 601
+    failover.check(wifi_only, modem_connected=True)
+    assert links.nmcli()[-1] == ["connection", "up", "2222-bbbb"]
+
+    failover.check(wifi_only, modem_connected=False)  # a modem that is not connected is left alone
+    failover.check([*wifi_only, Route("wwan0", 700)], modem_connected=True)
+    assert len(health.entries) == 2

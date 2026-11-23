@@ -268,7 +268,9 @@ class Controller:
         """Ping through the links on a thread of its own so a slow ping never delays recording."""
         while not self._stop.wait(NETWORK_CHECK_SECONDS):
             try:
-                self.failover.check(self.routes_reader())
+                cellular = self.network.cellular
+                connected = bool(cellular and cellular.state == "connected")
+                self.failover.check(self.routes_reader(), connected)
             except Exception:  # keep checking; the next round may succeed
                 log.exception("Failover check failed")
 

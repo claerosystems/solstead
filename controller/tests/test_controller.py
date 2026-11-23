@@ -299,7 +299,7 @@ def test_failover_runs_on_its_own_thread(config, ffmpeg, monkeypatch):
     controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg))
     checked = threading.Event()
     controller.routes_reader = lambda: [Route("wlan0", 600)]
-    controller.failover.check = lambda routes: checked.set()
+    controller.failover.check = lambda routes, connected: checked.set()
     controller.start()
     try:
         assert checked.wait(2)
