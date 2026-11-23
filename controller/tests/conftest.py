@@ -33,6 +33,7 @@ def config(storage_root: Path, tmp_path: Path) -> Config:
         recipients_path=tmp_path / "recipients.json",
         telemetry_settings_path=tmp_path / "telemetry.json",
         charger_settings_path=tmp_path / "charger.json",
+        motion_settings_path=tmp_path / "motion.json",
     )
 
 

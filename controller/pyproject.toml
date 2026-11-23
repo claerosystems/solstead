@@ -9,7 +9,7 @@ description = "Solstead controller: local ownership, local recording."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-dependencies = ["cryptography>=41"]
+dependencies = ["cryptography>=41", "numpy>=1.24"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5", "pyrage>=1.2"]
