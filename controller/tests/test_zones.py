@@ -63,3 +63,14 @@ def test_save_and_load(tmp_path):
     assert json.loads(path.read_text())["zones"][0]["name"] == "Driveway"
     path.write_text("{broken")
     assert load_motion_settings(path) == MotionSettings()
+
+
+def test_recognition_choices():
+    settings = MotionSettings()
+    assert settings.recognize and settings.objects == ("person", "vehicle")
+    updated = MotionSettings.from_dict({"objects": ["animal", "person"]}, base=settings)
+    assert updated.objects == ("person", "animal")
+    assert updated.to_dict()["objects"] == ["person", "animal"]
+    for bad in ({"objects": []}, {"objects": ["ghost"]}, {"recognize": 1}):
+        with pytest.raises(MotionSettingsError):
+            MotionSettings.from_dict(bad)

@@ -21,6 +21,7 @@ from .network import Network, read_network
 from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
+from .recognition import Recognizer
 from .sdnotify import notify
 from .sealing import SealingError, seal_file
 from .storage import Storage, StorageUnavailable, ram_folder
@@ -100,6 +101,7 @@ class Controller:
         self.verifier = MotionVerifier(
             config.camera_motion_url or config.camera_live_url or config.camera_url,
             self.gate, self.motion_settings,
+            recognizer=Recognizer(config.recognition_model_path),
         )  # fmt: skip
         if watcher is None and config.events_enabled:
             client = PullPointClient(
@@ -597,7 +599,9 @@ class Controller:
             "info", "events",
             f"Motion settings changed: {areas or 'no'} area{'s' if areas != 1 else ''}, "
             f"shadows {'ignored' if settings.ignore_shadows else 'counted'}, "
-            f"{settings.sensitivity} sensitivity",
+            f"{settings.sensitivity} sensitivity, "
+            + (f"recording only {' and '.join(settings.objects)}" if settings.recognize
+               else "recognition off"),
         )  # fmt: skip
         return self.motion_status()
 

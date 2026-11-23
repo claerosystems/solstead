@@ -23,64 +23,10 @@ struct MotionAreasView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    editor
-                    HStack {
-                        Button("Add area", systemImage: "plus.square.dashed") { addArea() }
-                            .disabled(settings.zones.count >= MotionArea.maximumAreas || picture == nil)
-                        Spacer()
-                        if let index = selectedIndex {
-                            Button("Delete", systemImage: "trash", role: .destructive) {
-                                settings.zones.remove(at: index)
-                                selected = settings.zones.last?.id
-                            }
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .labelStyle(.titleAndIcon)
-                } footer: {
-                    Text(settings.zones.isEmpty
-                         ? "No areas: motion anywhere in the picture counts. Add an area to watch only part of it, such as your driveway but not the road."
-                         : "Motion counts only inside the shaded areas. Drag a corner to reshape, drag inside an area to move it, and tap a + to add a corner. Tap a corner twice to remove it.")
-                }
-
-                if let index = selectedIndex {
-                    Section("Selected area") {
-                        TextField("Name", text: $settings.zones[index].name)
-                    }
-                }
-
-                Section {
-                    Toggle("Ignore shadows", isOn: $settings.ignoreShadows)
-                    Picker("Sensitivity", selection: $settings.sensitivity) {
-                        Text("Low").tag(MotionSensitivity.low)
-                        Text("Medium").tag(MotionSensitivity.medium)
-                        Text("High").tag(MotionSensitivity.high)
-                    }
-                    .pickerStyle(.segmented)
-                } header: {
-                    Text("Filtering")
-                } footer: {
-                    Text("Ignore shadows skips patches that only got darker while keeping their texture, like a cloud or a tree's shadow, and sudden changes across the whole picture. Low sensitivity needs larger, longer movement; high also catches small or distant movement.")
-                }
-
-                Section {
-                    Toggle("Check motion on the controller", isOn: $settings.verify)
-                    if let check = saved?.check {
-                        LabeledContent("Recorded", value: "\(check.confirmed)")
-                        LabeledContent("Ignored", value: "\(check.ignored)")
-                        if check.passedThrough > 0 {
-                            LabeledContent("Recorded unchecked", value: "\(check.passedThrough)")
-                        }
-                        if let lastError = check.lastError {
-                            Text(lastError).font(.callout).foregroundStyle(.orange)
-                        }
-                    }
-                } header: {
-                    Text("Since the controller started")
-                } footer: {
-                    Text("The camera notices movement; the controller then checks it against your areas and filters. If checking ever stops working, the controller records everything the camera reports, so nothing is missed.")
-                }
+                areasSection
+                filteringSection
+                recognitionSection
+                checkingSection
 
                 if let error {
                     Section { Text(error).foregroundStyle(.red) }
@@ -101,6 +47,111 @@ struct MotionAreasView: View {
             .interactiveDismissDisabled(changed)
             .task { await load() }
         }
+    }
+
+    @ViewBuilder private var areasSection: some View {
+        Section {
+            editor
+            HStack {
+                Button("Add area", systemImage: "plus.square.dashed") { addArea() }
+                    .disabled(settings.zones.count >= MotionArea.maximumAreas || picture == nil)
+                Spacer()
+                if let index = selectedIndex {
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        settings.zones.remove(at: index)
+                        selected = settings.zones.last?.id
+                    }
+                }
+            }
+            .buttonStyle(.bordered)
+            .labelStyle(.titleAndIcon)
+        } footer: {
+            Text(settings.zones.isEmpty
+                 ? "No areas: motion anywhere in the picture counts. Add an area to watch only part of it, such as your driveway but not the road."
+                 : "Motion counts only inside the shaded areas. Drag a corner to reshape, drag inside an area to move it, and tap a + to add a corner. Tap a corner twice to remove it.")
+        }
+
+        if let index = selectedIndex {
+            Section("Selected area") {
+                TextField("Name", text: $settings.zones[index].name)
+            }
+        }
+    }
+
+    @ViewBuilder private var filteringSection: some View {
+        Section {
+            Toggle("Ignore shadows", isOn: $settings.ignoreShadows)
+            Picker("Sensitivity", selection: $settings.sensitivity) {
+                Text("Low").tag(MotionSensitivity.low)
+                Text("Medium").tag(MotionSensitivity.medium)
+                Text("High").tag(MotionSensitivity.high)
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Filtering")
+        } footer: {
+            Text("Ignore shadows skips patches that only got darker while keeping their texture, like a cloud or a tree's shadow, and sudden changes across the whole picture. Low sensitivity needs larger, longer movement; high also catches small or distant movement.")
+        }
+    }
+
+    @ViewBuilder private var recognitionSection: some View {
+        Section {
+            Toggle("Only people, vehicles or animals", isOn: $settings.recognize)
+            if settings.recognize {
+                objectToggle("People", .person)
+                objectToggle("Vehicles", .vehicle)
+                objectToggle("Animals", .animal)
+            }
+            if let recognition = saved?.check?.recognition {
+                if let reason = recognition.reason, settings.recognize {
+                    Text("Not available on the controller: \(reason). Motion is checked with the filters above only.")
+                        .font(.callout).foregroundStyle(.orange)
+                } else if let kind = recognition.lastKind, let unix = recognition.lastUnix {
+                    LabeledContent("Last recognised") {
+                        Text("\(kind.capitalized), \(Date(timeIntervalSince1970: TimeInterval(unix)).formatted(.relative(presentation: .named)))")
+                    }
+                }
+            }
+        } header: {
+            Text("Recognition")
+        } footer: {
+            Text("When movement passes the area and shadow checks, the controller looks for a person, vehicle or animal in the picture and records only if it finds one you chose inside an area. Bicycles and motorcycles count as vehicles.")
+        }
+    }
+
+    @ViewBuilder private var checkingSection: some View {
+        Section {
+            Toggle("Check motion on the controller", isOn: $settings.verify)
+            if let check = saved?.check {
+                LabeledContent("Recorded", value: "\(check.confirmed)")
+                LabeledContent("Ignored", value: "\(check.ignored)")
+                if check.passedThrough > 0 {
+                    LabeledContent("Recorded unchecked", value: "\(check.passedThrough)")
+                }
+                if let lastError = check.lastError {
+                    Text(lastError).font(.callout).foregroundStyle(.orange)
+                }
+            }
+        } header: {
+            Text("Since the controller started")
+        } footer: {
+            Text("The camera notices movement; the controller then checks it against your areas and filters. If checking ever stops working, the controller records everything the camera reports, so nothing is missed.")
+        }
+    }
+
+    /// A toggle for one kind of object; the last one chosen can't be switched off.
+    private func objectToggle(_ title: String, _ kind: MotionObject) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { settings.objects.contains(kind) },
+            set: { on in
+                if on {
+                    settings.objects.insert(kind)
+                } else if settings.objects.count > 1 {
+                    settings.objects.remove(kind)
+                }
+            }
+        ))
+        .padding(.leading)
     }
 
     private var selectedIndex: Int? {

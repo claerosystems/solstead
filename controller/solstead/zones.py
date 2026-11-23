@@ -15,6 +15,7 @@ MIN_POINTS = 3
 MAX_POINTS = 16
 MAX_NAME = 40
 SENSITIVITIES = ("low", "medium", "high")
+OBJECT_KINDS = ("person", "vehicle", "animal")
 
 
 class MotionSettingsError(ValueError):
@@ -49,6 +50,9 @@ class MotionSettings:
     sensitivity: str = "medium"
     # Checking on the controller at all; off means every camera motion report records.
     verify: bool = True
+    # Record only when recognition finds one of these in an area (when recognition can run).
+    recognize: bool = True
+    objects: tuple[str, ...] = ("person", "vehicle")
 
     @classmethod
     def from_dict(cls, data: object, base: MotionSettings | None = None) -> MotionSettings:
@@ -67,7 +71,18 @@ class MotionSettings:
         sensitivity = data.get("sensitivity", base.sensitivity)
         if sensitivity not in SENSITIVITIES:
             raise MotionSettingsError("sensitivity must be low, medium or high")
-        return cls(zones, ignore_shadows, sensitivity, verify)
+        recognize = data.get("recognize", base.recognize)
+        if not isinstance(recognize, bool):
+            raise MotionSettingsError("recognize must be true or false")
+        objects = data.get("objects", list(base.objects))
+        if (
+            not isinstance(objects, list)
+            or not objects
+            or not all(kind in OBJECT_KINDS for kind in objects)
+        ):
+            raise MotionSettingsError("objects must list one or more of person, vehicle, animal")
+        objects = tuple(kind for kind in OBJECT_KINDS if kind in objects)
+        return cls(zones, ignore_shadows, sensitivity, verify, recognize, objects)
 
     def to_dict(self) -> dict:
         return {
@@ -75,7 +90,12 @@ class MotionSettings:
             "ignore_shadows": self.ignore_shadows,
             "sensitivity": self.sensitivity,
             "verify": self.verify,
+            "recognize": self.recognize,
+            "objects": list(self.objects),
         }
+
+    def in_areas(self, x: float, y: float) -> bool:
+        return not self.zones or any(zone.contains(x, y) for zone in self.zones)
 
     def mask(self, width: int, height: int) -> bytearray:
         """1 for each analysed pixel inside an area (all pixels when there are no areas)."""

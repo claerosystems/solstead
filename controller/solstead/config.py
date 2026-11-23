@@ -62,6 +62,8 @@ class Config:
     motion_settings_path: Path | None = None
     # A small stream the controller checks motion on; unset uses camera_live_url, then camera_url.
     camera_motion_url: str | None = None
+    # Person/vehicle recognition model (deploy/fetch-model.sh puts it beside config.json).
+    recognition_model_path: Path | None = None
 
     @property
     def events_enabled(self) -> bool:
@@ -153,6 +155,9 @@ class Config:
                 Path(data["motion_settings_path"]) if data.get("motion_settings_path") else None
             ),
             camera_motion_url=motion_url,
+            recognition_model_path=(
+                Path(data["recognition_model_path"]) if data.get("recognition_model_path") else None
+            ),
         )
 
     @classmethod
@@ -180,6 +185,9 @@ class Config:
         data["motion_settings_path"] = data.get("motion_settings_path") or str(
             path.with_name("motion.json")
         )
+        data["recognition_model_path"] = data.get("recognition_model_path") or str(
+            path.with_name("ssd_mobilenet_v1_12.onnx")
+        )
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:
@@ -187,7 +195,7 @@ class Config:
         for key in (
             "storage_path", "tls_cert", "tls_key", "settings_path", "buffer_path",
             "recipients_path", "telemetry_settings_path", "charger_settings_path",
-            "motion_settings_path",
+            "motion_settings_path", "recognition_model_path",
         ):  # fmt: skip
             if data[key] is not None:
                 data[key] = str(data[key])

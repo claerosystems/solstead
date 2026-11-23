@@ -18,6 +18,9 @@ for tool in python3 ffmpeg openssl; do command -v "$tool" >/dev/null || { echo "
 # The ble extra reads a Victron solar charger over Bluetooth. If the Pi's Bluetooth is
 # switched off, `rfkill unblock bluetooth` turns it on (no root needed on Raspberry Pi OS).
 "$HERE/.venv/bin/pip" install --quiet -e "$HERE[ble]"
+# Recognition (onnxruntime) lets motion checking record only people and vehicles. Optional: if no
+# wheel exists for this Pi, motion checking still works with its area and shadow filters.
+"$HERE/.venv/bin/pip" install --quiet "onnxruntime>=1.17" || echo "WARNING: onnxruntime not installed; recognition off" >&2
 
 mkdir -p "$ETC"
 chmod 700 "$ETC"
@@ -28,6 +31,7 @@ if [ ! -f "$ETC/config.json" ]; then
     ${SOLSTEAD_CAMERA_USER:+--camera-user "$SOLSTEAD_CAMERA_USER"} \
     ${SOLSTEAD_CAMERA_PASSWORD:+--camera-password "$SOLSTEAD_CAMERA_PASSWORD"}
 fi
+"$HERE/deploy/fetch-model.sh" "$ETC"
 mountpoint -q "$STORAGE" || echo "WARNING: $STORAGE is not a mount point" >&2
 
 mkdir -p "$HOME/.config/systemd/user"

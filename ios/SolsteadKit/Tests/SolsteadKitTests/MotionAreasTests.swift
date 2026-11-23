@@ -5,10 +5,14 @@ final class MotionAreasTests: XCTestCase {
     let motionJSON = Data("""
     {"zones": [{"name": "Driveway", "points": [[0.1, 0.5], [0.9, 0.5], [0.9, 1.0], [0.1, 1.0]]}],
      "ignore_shadows": true, "sensitivity": "medium", "verify": true,
+     "recognize": true, "objects": ["person", "vehicle"],
      "check": {"available": true, "enabled": true, "running": true, "frames": 120, "restarts": 0,
                "last_error": null, "seeing_motion": false, "largest_object_pixels": 0,
                "shadow_fraction": 0.0, "checking": true, "confirmed": 3, "ignored": 17,
-               "passed_through": 1}}
+               "passed_through": 1,
+               "recognition": {"wanted": true, "available": true, "reason": null, "runs": 4,
+                               "inference_ms": 180.5, "last_kind": "person", "last_score": 0.81,
+                               "last_unix": 1795450194}}}
     """.utf8)
 
     func testDecodesAndSendsMotionSettings() async throws {
@@ -24,8 +28,12 @@ final class MotionAreasTests: XCTestCase {
         XCTAssertEqual(settings.sensitivity, .medium)
         XCTAssertEqual(settings.check?.ignored, 17)
         XCTAssertEqual(settings.check?.passedThrough, 1)
+        XCTAssertEqual(settings.objects, [.person, .vehicle])
+        XCTAssertEqual(settings.check?.recognition?.lastKind, "person")
+        XCTAssertEqual(settings.check?.recognition?.inferenceMs, 180.5)
 
         settings.ignoreShadows = false
+        settings.objects.insert(.animal)
         settings.zones.append(.rectangle(named: "Path"))
         _ = try await client.updateMotion(settings)
         let put = try XCTUnwrap(transport.requests.last)
@@ -35,11 +43,21 @@ final class MotionAreasTests: XCTestCase {
         XCTAssertEqual(sent["ignore_shadows"] as? Bool, false)
         XCTAssertEqual(sent["sensitivity"] as? String, "medium")
         XCTAssertNil(sent["check"])
+        XCTAssertEqual(sent["recognize"] as? Bool, true)
+        XCTAssertEqual(sent["objects"] as? [String], ["person", "vehicle", "animal"])
         let zones = try XCTUnwrap(sent["zones"] as? [[String: Any]])
         XCTAssertEqual(zones.count, 2)
         XCTAssertEqual(zones[1]["name"] as? String, "Path")
         XCTAssertEqual((zones[1]["points"] as? [[Double]])?.first, [0.3, 0.3])
         XCTAssertNil(zones[1]["id"])
+    }
+
+    func testOlderControllerWithoutRecognition() throws {
+        let json = Data(#"{"zones": [], "ignore_shadows": false, "sensitivity": "high", "verify": true}"#.utf8)
+        let settings = try ControllerJSON.decoder.decode(MotionSettings.self, from: json)
+        XCTAssertFalse(settings.recognize)
+        XCTAssertEqual(settings.sensitivity, .high)
+        XCTAssertNil(settings.check)
     }
 
     func testGeometry() {

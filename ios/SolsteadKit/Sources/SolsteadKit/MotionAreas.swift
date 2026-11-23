@@ -104,6 +104,23 @@ public enum MotionSensitivity: String, Codable, CaseIterable, Sendable {
     case low, medium, high
 }
 
+/// What recognition can record: people, vehicles (bicycles to trucks) and animals.
+public enum MotionObject: String, Codable, CaseIterable, Sendable {
+    case person, vehicle, animal
+}
+
+/// The recogniser's state, inside `MotionCheck`.
+public struct MotionRecognition: Decodable, Equatable, Sendable {
+    public let wanted: Bool
+    public let available: Bool
+    public let reason: String?
+    public let runs: Int
+    public let inferenceMs: Double?
+    public let lastKind: String?
+    public let lastScore: Double?
+    public let lastUnix: Int?
+}
+
 /// What the controller's motion checker is doing, from `GET /v1/motion`.
 public struct MotionCheck: Decodable, Equatable, Sendable {
     public let checking: Bool
@@ -114,6 +131,7 @@ public struct MotionCheck: Decodable, Equatable, Sendable {
     public let running: Bool?
     public let seeingMotion: Bool?
     public let lastError: String?
+    public let recognition: MotionRecognition?
 }
 
 /// The owner's motion areas and shadow filtering, stored on the controller.
@@ -122,18 +140,37 @@ public struct MotionSettings: Codable, Equatable, Sendable {
     public var ignoreShadows: Bool
     public var sensitivity: MotionSensitivity
     public var verify: Bool
+    /// Record only when recognition finds one of `objects` in an area (when the controller can recognise).
+    public var recognize: Bool
+    public var objects: Set<MotionObject>
     public var check: MotionCheck?
 
     public init(zones: [MotionArea] = [], ignoreShadows: Bool = true, sensitivity: MotionSensitivity = .medium,
-                verify: Bool = true, check: MotionCheck? = nil) {
+                verify: Bool = true, recognize: Bool = true, objects: Set<MotionObject> = [.person, .vehicle],
+                check: MotionCheck? = nil) {
         self.zones = zones
         self.ignoreShadows = ignoreShadows
         self.sensitivity = sensitivity
         self.verify = verify
+        self.recognize = recognize
+        self.objects = objects
         self.check = check
     }
 
-    enum CodingKeys: String, CodingKey { case zones, ignoreShadows, sensitivity, verify, check }
+    enum CodingKeys: String, CodingKey { case zones, ignoreShadows, sensitivity, verify, recognize, objects, check }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        zones = try container.decodeIfPresent([MotionArea].self, forKey: .zones) ?? []
+        ignoreShadows = try container.decodeIfPresent(Bool.self, forKey: .ignoreShadows) ?? true
+        sensitivity = try container.decodeIfPresent(MotionSensitivity.self, forKey: .sensitivity) ?? .medium
+        verify = try container.decodeIfPresent(Bool.self, forKey: .verify) ?? true
+        // Controllers from before recognition send neither key.
+        recognize = try container.decodeIfPresent(Bool.self, forKey: .recognize) ?? false
+        let names = try container.decodeIfPresent([String].self, forKey: .objects) ?? ["person", "vehicle"]
+        objects = Set(names.compactMap(MotionObject.init(rawValue:)))
+        check = try container.decodeIfPresent(MotionCheck.self, forKey: .check)
+    }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -141,11 +178,14 @@ public struct MotionSettings: Codable, Equatable, Sendable {
         try container.encode(ignoreShadows, forKey: .ignoreShadows)
         try container.encode(sensitivity, forKey: .sensitivity)
         try container.encode(verify, forKey: .verify)
+        try container.encode(recognize, forKey: .recognize)
+        try container.encode(MotionObject.allCases.filter(objects.contains).map(\.rawValue), forKey: .objects)
     }
 
     /// Settings compared without the checker's live counts, to tell whether there are edits to save.
     public func sameChoices(as other: MotionSettings) -> Bool {
         zones.map(\.points) == other.zones.map(\.points) && zones.map(\.name) == other.zones.map(\.name)
             && ignoreShadows == other.ignoreShadows && sensitivity == other.sensitivity && verify == other.verify
+            && recognize == other.recognize && objects == other.objects
     }
 }

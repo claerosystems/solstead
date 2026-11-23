@@ -15,6 +15,7 @@ The service that runs on the Raspberry Pi inside the controller. The standard li
 | `solstead/onvif.py` | Minimal ONVIF pull-point client for the camera's motion events (WS-UsernameToken auth). |
 | `solstead/motion.py` | Background thread that subscribes, pulls, renews and feeds the recorder. |
 | `solstead/verifier.py` | Checks the camera's motion reports on a small stream: motion areas, shadows, lighting changes. |
+| `solstead/recognition.py` | Person, vehicle and animal detection (onnxruntime) for motion checking. |
 | `solstead/zones.py` | The owner's motion areas and shadow settings (`motion.json`). |
 | `solstead/events.py` | Event recorder state machine and the size-capped events allocation. |
 | `solstead/clips.py` | Assembles a clip from buffered segments with ffmpeg's concat demuxer. |
@@ -84,6 +85,17 @@ traffic and moving shadows. The controller therefore checks each report itself:
   sweeping) the frame is treated as a lighting change and the background relearned.
 - Isolated pixels are dropped, and the largest connected object must reach a size set by the
   `sensitivity` (low, medium, high) in two or three of the last three frames.
+
+- With `recognize` on (the default), movement that passes those checks is shown to a person,
+  vehicle and animal detector (`recognition.py`: SSD MobileNet v1 trained on COCO, from the ONNX
+  model zoo under the Apache License 2.0, run with onnxruntime on two threads). The checker then
+  agrees only when one of the owner's chosen `objects` is found with at least 50% confidence and
+  its box's bottom middle (or centre) lies in an area. A recognition keeps confirming for 15 seconds.
+  To keep the Pi's load down the detector sees 512×288 frames, at most once a second, and only
+  while there is movement. The installers add onnxruntime and run `deploy/fetch-model.sh`, which
+  downloads the 29 MB model beside `config.json` and checks its SHA-256. Without either, recognition
+  reports why in `check.recognition.reason` and the motion filters decide alone. Events confirmed
+  this way are labelled with the kind found (`trigger` is `person`, `vehicle` or `animal`).
 
 The recorder hears about motion only while the camera reports motion and the checker agrees; the
 start is backdated to the camera's report (at most `event_pre_seconds`), so the pre-roll is intact.
@@ -230,6 +242,7 @@ The bench fake camera is an MPEG-TS stream over HTTP; real cameras use `rtsp://`
 | `camera_live_url` | none | Lower-resolution stream for live view; falls back to `camera_url`. |
 | `camera_motion_url` | none | Small stream the controller checks motion on; falls back to `camera_live_url`, then `camera_url`. |
 | `motion_settings_path` | `motion.json` beside `config.json` | Owner-drawn motion areas, shadow filtering and sensitivity. |
+| `recognition_model_path` | `ssd_mobilenet_v1_12.onnx` beside `config.json` | Person, vehicle and animal detector used by motion checking. |
 | `live_segment_seconds`, `live_idle_seconds` | `1`, `20` | HLS segment length and how long live view survives without a viewer. |
 | `live_path` | `/dev/shm/solstead-live` | Where live segments are written; should be RAM. |
 | `buffer_path` | `/dev/shm/solstead-buffer` | Pre-event buffer and clip assembly; must be RAM so plaintext never reaches the SSD. |
@@ -260,8 +273,8 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events, unencrypted_frames}`. Also in the status as `encryption`. |
 | `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
 | `DELETE /v1/encryption` | Turn encryption off: forget the enrolled keys so new recordings are stored unencrypted. Clips already sealed stay sealed. |
-| `GET /v1/motion` | `{zones: [{name, points: [[x, y], …]}], ignore_shadows, sensitivity, verify, check: {…}}`. Points are fractions of the picture, (0, 0) top left. `check` reports whether checking is running, what it sees now, and confirmed, ignored and passed-through counts. |
-| `PUT /v1/motion` | Change any of `zones` (up to 8 areas of 3–16 points), `ignore_shadows`, `sensitivity` (`low`, `medium`, `high`) and `verify` (false records every camera report unchecked). Applied at once and saved to `motion.json`. 400 if invalid. |
+| `GET /v1/motion` | `{zones: [{name, points: [[x, y], …]}], ignore_shadows, sensitivity, verify, recognize, objects, check: {…}}`. Points are fractions of the picture, (0, 0) top left. `check` reports whether checking is running, what it sees now, confirmed, ignored and passed-through counts, and `recognition` (available, reason, runs, inference time, last kind and score). |
+| `PUT /v1/motion` | Change any of `zones` (up to 8 areas of 3–16 points), `ignore_shadows`, `sensitivity` (`low`, `medium`, `high`), `recognize`, `objects` (one or more of `person`, `vehicle`, `animal`) and `verify` (false records every camera report unchecked). Applied at once and saved to `motion.json`. 400 if invalid. |
 | `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames (`date`, `frames`, `bytes`, `encrypted_frames`). |
 | `PUT /v1/timelapse` | Change `enabled`, `interval_seconds`, `window` (and `width`, `allocation_bytes`, `export_fps`); JSON body. |
 | `GET /v1/timelapse/{date}` | That day's frames (`day`, `name`, `unix`, `size_bytes`, `encrypted`). |

@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .camera import input_args
+from .recognition import Detection, RecognitionWorker, Recognizer
 from .zones import MotionSettings
 
 try:  # numpy is only needed for checking; recording still works without it.
@@ -35,6 +36,8 @@ FRAMES_PER_SECOND = 4
 WARMUP_FRAMES = 8
 STALE_SECONDS = 10.0
 RESTART_SECONDS = 10.0
+RECOGNITION_SCALE = 2  # recognition sees frames twice the analysed size (512 x 288)
+RECOGNITION_HOLD_SECONDS = 15.0  # a recognised person or vehicle keeps confirming this long
 
 # Per sensitivity: brightness change counted as movement, smallest object in analysed pixels
 # (a person at 20 m with the S445's 4 mm lens is roughly 4 x 14 pixels at 256 x 144), and how many
@@ -89,9 +92,11 @@ class FrameDetector:
         self.tuning = SENSITIVITY[settings.sensitivity]
         self.history.clear()
 
-    def analyse(self, frame: bytes) -> Verdict:
-        image = np.frombuffer(frame, dtype=np.uint8).reshape(self.height, self.width, 3)
-        image = image.astype(np.float32)
+    def analyse(self, frame) -> Verdict:
+        """Analyse one frame: raw RGB bytes, or an H x W x 3 array, at the detector's size."""
+        if isinstance(frame, bytes | bytearray):
+            frame = np.frombuffer(frame, dtype=np.uint8).reshape(self.height, self.width, 3)
+        image = frame.astype(np.float32)
         self.frames += 1
         if self.background is None:
             self.background = image.copy()
@@ -245,10 +250,12 @@ class MotionGate:
             self.camera_last = at
             self._evaluate(now)
 
-    def verdict(self, active: bool, now: float | None = None) -> None:
+    def verdict(self, active: bool, now: float | None = None, label: str | None = None) -> None:
         now = self.clock() if now is None else now
         with self._lock:
             self.checker_active = active
+            if active and label:
+                self.trigger = label
             self._evaluate(now)
 
     def tick(self, now: float | None = None) -> None:
@@ -307,7 +314,8 @@ class MotionVerifier:
     def __init__(self, url: str | None, gate: MotionGate, settings: MotionSettings,
                  width: int = FRAME_WIDTH, height: int = FRAME_HEIGHT,
                  fps: int = FRAMES_PER_SECOND, spawner: Spawner = subprocess.Popen,
-                 clock: Callable[[], float] = time.time):  # fmt: skip
+                 clock: Callable[[], float] = time.time,
+                 recognizer: Recognizer | None = None):  # fmt: skip
         self.url = url
         self.gate = gate
         self.settings = settings
@@ -326,6 +334,10 @@ class MotionVerifier:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self.recognizer = recognizer
+        self.worker = RecognitionWorker(recognizer, self.recognized) if recognizer else None
+        self.recognized_at: float | None = None
+        self.last_detection: Detection | None = None
         gate.checker = self
 
     @property
@@ -343,9 +355,19 @@ class MotionVerifier:
             and self.frames > WARMUP_FRAMES
         )
 
+    @property
+    def recognizing(self) -> bool:
+        """Recognition is wanted and can run; otherwise motion filters alone decide."""
+        return bool(self.recognizer and self.settings.recognize and self.recognizer.available)
+
+    @property
+    def scale(self) -> int:
+        return RECOGNITION_SCALE if self.recognizer else 1
+
     def command(self) -> list[str]:
+        width, height = self.width * self.scale, self.height * self.scale
         return input_args(self.url) + [
-            "-an", "-vf", f"fps={self.fps},scale={self.width}:{self.height}",
+            "-an", "-vf", f"fps={self.fps},scale={width}:{height}",
             "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
         ]  # fmt: skip
 
@@ -376,6 +398,8 @@ class MotionVerifier:
         if self._thread:
             self._thread.join(10)
             self._thread = None
+        if self.worker:
+            self.worker.stop()
         self.last_frame = None
         self.gate.verdict(False)
 
@@ -389,7 +413,8 @@ class MotionVerifier:
 
     def read_stream(self) -> None:
         """Run ffmpeg once and analyse frames until it exits or we are stopped."""
-        size = self.width * self.height * 3
+        scale = self.scale
+        size = self.width * scale * self.height * scale * 3
         try:
             # ffmpeg's stderr may contain camera credentials; never capture or log it.
             self.process = self.spawner(
@@ -408,14 +433,20 @@ class MotionVerifier:
                 if frame is None:
                     self.last_error = "Motion checking stream ended; restarting"
                     break
+                full = np.frombuffer(frame, dtype=np.uint8).reshape(
+                    self.height * scale, self.width * scale, 3
+                )
+                small = full
+                if scale > 1:
+                    small = full.reshape(self.height, scale, self.width, scale, 3).mean(axis=(1, 3))
                 with self._lock:
-                    verdict = self.detector.analyse(frame)
+                    verdict = self.detector.analyse(small)
                 now = self.clock()
                 self.frames += 1
                 self.last_frame = now
                 self.last_verdict = verdict
                 self.last_error = None
-                self.gate.verdict(verdict.active, now)
+                self.gate.verdict(*self.decide(verdict.active, full, now))
         finally:
             if self.process.poll() is None:
                 self.process.terminate()
@@ -425,9 +456,48 @@ class MotionVerifier:
                     self.process.kill()
             self.process = None
 
+    def decide(self, moving: bool, full, now: float) -> tuple[bool, float, str | None]:
+        """Whether this frame confirms motion: filters alone, or filters plus recognition."""
+        if not self.recognizing:
+            return moving, now, None
+        if moving:
+            self.worker.submit(full.copy(), now)
+        recent = self.recognized_at is not None and now - self.recognized_at <= (
+            RECOGNITION_HOLD_SECONDS
+        )
+        label = self.last_detection.kind if recent and self.last_detection else None
+        return moving and recent, now, label
+
+    def recognized(self, detections: list[Detection]) -> None:
+        """Called by the recognition worker with what it found in a submitted frame."""
+        settings = self.settings
+        wanted = [
+            d
+            for d in detections
+            if d.kind in settings.objects
+            and (settings.in_areas(*d.foot) or settings.in_areas((d.box[0] + d.box[2]) / 2,
+                                                                (d.box[1] + d.box[3]) / 2))
+        ]  # fmt: skip
+        if wanted:
+            self.last_detection = max(wanted, key=lambda d: d.score)
+            self.recognized_at = self.clock()
+
     def status(self) -> dict:
         verdict = self.last_verdict
+        recognizer = self.recognizer
+        detection = self.last_detection
+        recognition = {
+            "wanted": self.settings.recognize,
+            "available": bool(recognizer and recognizer.available),
+            "reason": recognizer.reason if recognizer else "Recognition not configured",
+            "runs": self.worker.runs if self.worker else 0,
+            "inference_ms": recognizer.last_ms if recognizer else None,
+            "last_kind": detection.kind if detection else None,
+            "last_score": detection.score if detection else None,
+            "last_unix": int(self.recognized_at) if self.recognized_at else None,
+        }
         return {
+            "recognition": recognition,
             "available": self.available,
             "enabled": self.enabled,
             "running": self._thread is not None,
