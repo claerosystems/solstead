@@ -84,6 +84,17 @@ public struct ControllerClient: Sendable {
         return try decode(TimeLapseStatus.self, from: await request("v1/timelapse", method: "PUT", body: body))
     }
 
+    /// The owner's motion areas, shadow filtering and the checker's counts.
+    public func motion() async throws -> MotionSettings {
+        try decode(MotionSettings.self, from: await request("v1/motion"))
+    }
+
+    /// Replaces the motion areas and filter choices; the controller applies them at once.
+    public func updateMotion(_ settings: MotionSettings) async throws -> MotionSettings {
+        let body = try ControllerJSONEncoder.encoder.encode(settings)
+        return try decode(MotionSettings.self, from: await request("v1/motion", method: "PUT", body: body))
+    }
+
     /// Downloads a day's time-lapse video (assembled by the controller) to a temporary file.
     /// A day with sealed frames answers 409; see `assembleTimelapse` for those.
     public func downloadTimelapseVideo(day: String) async throws -> URL {
