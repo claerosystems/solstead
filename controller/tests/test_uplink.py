@@ -78,8 +78,10 @@ def test_prefer_cellular_swaps_metrics_and_persists(tmp_path):
     assert nm.metrics == {"1111": 700, "2222": 700, "3333": 600}
     # Only active profiles are reapplied, and nothing is brought down.
     assert ["device", "reapply", "wlan0"] in nm.writes()
-    assert ["device", "reapply", "cdc-wdm0"] in nm.writes()
-    assert not any(c[1] in ("up", "down") for c in nm.writes())
+    # A modem loses its IP on reapply, so the cellular connection is re-activated instead.
+    assert ["connection", "up", "3333"] in nm.writes()
+    assert not any(c[:2] == ["device", "reapply"] and c[2] == "cdc-wdm0" for c in nm.writes())
+    assert not any(c[1] == "down" for c in nm.writes())
     assert json.loads(path.read_text()) == {"preferred": "cellular"}
     assert Uplink(path, runner=nm).preferred == "cellular"
 

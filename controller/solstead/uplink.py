@@ -171,8 +171,8 @@ class Uplink:
             return None
 
     def _apply(self, profiles: list[Profile], preferred: str) -> bool:
-        """Write each profile's metric where it differs; reapply the active ones so it takes
-        effect without dropping the link."""
+        """Write each profile's metric where it differs and make it take effect on active ones:
+        Wi-Fi is reapplied without dropping the link, cellular is re-activated."""
         wanted = metrics_for(preferred)
         changed = False
         for profile in profiles:
@@ -180,7 +180,12 @@ class Uplink:
             if self._metric(profile) == metric:
                 continue
             self._nmcli("connection", "modify", profile.uuid, "ipv4.route-metric", str(metric))
-            if profile.device:
+            if profile.device and profile.kind == "cellular":
+                # Reapplying a ModemManager device drops the bearer's IPv4 address and route
+                # while NetworkManager still reports it activated, so re-activate instead: the
+                # cellular link is down for a few seconds while Wi-Fi carries traffic.
+                self._nmcli("connection", "up", profile.uuid)
+            elif profile.device:
                 self._nmcli("device", "reapply", profile.device)
             changed = True
         return changed

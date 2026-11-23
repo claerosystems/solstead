@@ -169,8 +169,9 @@ The controller is meant to run for weeks without a visit, so it watches itself:
 - **Preferred link.** With both Wi-Fi and cellular set up, the owner picks which one carries
   traffic (`PUT /v1/network {"preferred": "wifi"|"cellular"}`). Both stay connected: the
   controller sets `ipv4.route-metric` to 600 on the preferred link's NetworkManager profiles
-  (every Wi-Fi profile, or `solstead-cellular`) and 700 on the other's, then runs
-  `nmcli device reapply` so the change takes effect without dropping either link. If the
+  (every Wi-Fi profile, or `solstead-cellular`) and 700 on the other's, then applies it: `nmcli device reapply` for Wi-Fi, which keeps the link up, and
+  `nmcli connection up` for cellular, because reapplying a ModemManager device drops its IPv4
+  address (cellular is down for a few seconds while Wi-Fi carries traffic). If the
   preferred link disconnects, NetworkManager withdraws its route and traffic moves to the other
   by itself. The metrics live in the profiles, so they hold across reboots; the choice is also
   kept in `uplink.json` beside `config.json` and re-applied at start in case a profile was added
