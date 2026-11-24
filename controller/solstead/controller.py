@@ -21,6 +21,7 @@ from .network import Network, read_network
 from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
+from .recognition import Recognizer
 from .sdnotify import notify
 from .sealing import SealingError, seal_file
 from .storage import Storage, StorageUnavailable, ram_folder
@@ -28,7 +29,9 @@ from .telemetry import Telemetry
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
 from .uplink import NetworkManagerError, Uplink
+from .verifier import MotionGate, MotionVerifier
 from .victron import Charger
+from .zones import MotionSettings, load_motion_settings, save_motion_settings
 
 LEGACY_BUFFER_FOLDER = "buffer"  # the pre-event buffer lived on the SSD before it moved to RAM
 HEALTH_FILE = "health.jsonl"
@@ -94,12 +97,20 @@ class Controller:
             config.event_hold_seconds, config.event_max_seconds,
             work_folder=self.work_folder, recipients=self.recipients.keys,
         )  # fmt: skip
+        self.motion_settings = load_motion_settings(config.motion_settings_path)
+        self.gate = MotionGate(self.recorder, hold_seconds=config.event_hold_seconds,
+                               lookback=config.event_pre_seconds)  # fmt: skip
+        self.verifier = MotionVerifier(
+            config.camera_motion_url or config.camera_live_url or config.camera_url,
+            self.gate, self.motion_settings,
+            recognizer=Recognizer(config.recognition_model_path),
+        )  # fmt: skip
         if watcher is None and config.events_enabled:
             client = PullPointClient(
                 config.camera_onvif_url, config.camera_user, config.camera_password,
                 topics=config.motion_topics,
             )  # fmt: skip
-            watcher = MotionWatcher(client, self.recorder)
+            watcher = MotionWatcher(client, self.gate)
         self.watcher = watcher
         self.live = live or LiveStream(
             config.camera_live_url, config.camera_url,
@@ -146,6 +157,7 @@ class Controller:
             "watcher_error": None,
             "timelapse_error": None,
             "recorder_error": None,
+            "checker_error": None,
             "sealing_error": None,
             "clock_warned": False,
         }
@@ -207,6 +219,7 @@ class Controller:
             self._poll_incidents()
             self.live.reap()
             if self.events_running:
+                self.gate.tick()
                 try:
                     for event in self.recorder.tick():
                         self.health.record(
@@ -393,6 +406,7 @@ class Controller:
         self.buffer.start()
         if self.watcher:
             self.watcher.start()
+            self.verifier.start()
         self.events_running = True
         self.events_reason = None
         self.health.record("info", "events", "Event recording started")
@@ -446,6 +460,10 @@ class Controller:
                 elif seen["watcher_errors"]:
                     self.health.record("info", "camera", "Camera events are flowing again")
             seen["watcher_errors"] = self.watcher.errors
+        if self.verifier.last_error != seen["checker_error"]:
+            seen["checker_error"] = self.verifier.last_error
+            if self.verifier.last_error:
+                self.health.record("warning", "events", self.verifier.last_error)
         if self.recorder.last_error != seen["recorder_error"]:
             seen["recorder_error"] = self.recorder.last_error
             if self.recorder.last_error:
@@ -460,6 +478,7 @@ class Controller:
     def _stop_events(self) -> None:
         if self.watcher:
             self.watcher.stop()
+        self.verifier.stop()
         self.buffer.stop()
         if self.events_running:
             self.health.record("info", "events", "Event recording stopped")
@@ -479,6 +498,7 @@ class Controller:
             "camera_error": self.watcher.last_error if self.watcher else None,
             "camera_clock_skew_seconds": self.watcher.last_skew_seconds if self.watcher else None,
             "camera_clock_synced_unix": self.watcher.clock_synced_unix if self.watcher else None,
+            "motion_check": {**self.verifier.status(), **self.gate.status()},
             "last_event_unix": self.recorder.last_event_unix,
             "last_error": self.recorder.last_error,
             "count": 0,
@@ -584,6 +604,32 @@ class Controller:
         if self.config.settings_path:
             save_settings(self.config.settings_path, settings)
         return self.timelapse.status()
+
+    def motion_status(self) -> dict:
+        return {
+            **self.motion_settings.to_dict(),
+            "check": {**self.verifier.status(), **self.gate.status()},
+        }
+
+    def update_motion(self, changes: dict) -> dict:
+        settings = MotionSettings.from_dict(changes, base=self.motion_settings)
+        if self.config.motion_settings_path:
+            save_motion_settings(self.config.motion_settings_path, settings)
+        self.motion_settings = settings
+        if self.events_running and self.watcher:
+            self.verifier.update(settings)
+        else:
+            self.verifier.settings = settings
+        areas = len(settings.zones)
+        self.health.record(
+            "info", "events",
+            f"Motion settings changed: {areas or 'no'} area{'s' if areas != 1 else ''}, "
+            f"shadows {'ignored' if settings.ignore_shadows else 'counted'}, "
+            f"{settings.sensitivity} sensitivity, "
+            + (f"recording only {' and '.join(settings.objects)}" if settings.recognize
+               else "recognition off"),
+        )  # fmt: skip
+        return self.motion_status()
 
     def update_telemetry(self, changes: dict) -> dict:
         """The owner changed how long telemetry is kept; shortening deletes older days now."""

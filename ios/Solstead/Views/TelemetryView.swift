@@ -201,27 +201,10 @@ private struct PowerSection: View {
     let history: TelemetryHistory
 
     var body: some View {
-        let solar = history.segments { $0.solarW }
-        let load = history.segments { $0.loadW }
         Section {
             Chart {
-                ForEach(Array(solar.enumerated()), id: \.offset) { index, run in
-                    ForEach(run) { point in
-                        AreaMark(x: .value("Time", point.date), y: .value("Watts", point.solarW ?? 0),
-                                 series: .value("Run", "solar \(index)"))
-                            .foregroundStyle(Color.orange.opacity(0.25))
-                        LineMark(x: .value("Time", point.date), y: .value("Watts", point.solarW ?? 0),
-                                 series: .value("Run", "solar line \(index)"))
-                            .foregroundStyle(by: .value("Series", "Solar"))
-                    }
-                }
-                ForEach(Array(load.enumerated()), id: \.offset) { index, run in
-                    ForEach(run) { point in
-                        LineMark(x: .value("Time", point.date), y: .value("Watts", point.loadW ?? 0),
-                                 series: .value("Run", "use \(index)"))
-                            .foregroundStyle(by: .value("Series", "System use"))
-                    }
-                }
+                solarMarks(history.segments { $0.solarW })
+                useMarks(history.segments { $0.loadW })
             }
             .chartForegroundStyleScale(["Solar": Color.orange, "System use": Color.blue])
             .timeAxis(history)
@@ -232,6 +215,32 @@ private struct PowerSection: View {
             Text("Power")
         } footer: {
             Text("Solar is what the charger takes from the panel. System use is the camera and controller on the charger's load output.")
+        }
+    }
+
+    // Split out of `body`: as one expression the chart was too much for the type checker.
+    @ChartContentBuilder
+    private func solarMarks(_ runs: [[TelemetryPoint]]) -> some ChartContent {
+        ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+            ForEach(run) { point in
+                AreaMark(x: .value("Time", point.date), y: .value("Watts", point.solarW ?? 0),
+                         series: .value("Run", "solar \(index)"))
+                    .foregroundStyle(Color.orange.opacity(0.25))
+                LineMark(x: .value("Time", point.date), y: .value("Watts", point.solarW ?? 0),
+                         series: .value("Run", "solar line \(index)"))
+                    .foregroundStyle(by: .value("Series", "Solar"))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func useMarks(_ runs: [[TelemetryPoint]]) -> some ChartContent {
+        ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+            ForEach(run) { point in
+                LineMark(x: .value("Time", point.date), y: .value("Watts", point.loadW ?? 0),
+                         series: .value("Run", "use \(index)"))
+                    .foregroundStyle(by: .value("Series", "System use"))
+            }
         }
     }
 }

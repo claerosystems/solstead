@@ -20,6 +20,7 @@ from .telemetry import TelemetryError
 from .timelapse import TimeLapseError, TimeLapseSealed
 from .uplink import NetworkManagerError, NoProfile, UplinkError
 from .victron import ChargerError
+from .zones import MotionSettingsError
 
 JSON = "application/json"
 SEALED = "application/octet-stream"  # an age-encryption.org/v1 file the phone decrypts
@@ -179,6 +180,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, controller.network_status())
             if self.command == "PUT" and path == "/v1/network":
                 return self.reply(200, controller.set_network(self.read_json()))
+            if get and path == "/v1/motion":
+                return self.reply(200, controller.motion_status())
+            if self.command == "PUT" and path == "/v1/motion":
+                return self.reply(200, controller.update_motion(self.read_json()))
             if get and path == "/v1/timelapse":
                 return self.reply(
                     200, {**controller.timelapse.status(), "days": controller.timelapse.days()}
@@ -277,6 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             SealingError,
             TelemetryError,
             ChargerError,
+            MotionSettingsError,
         ) as error:
             return self.reply(400, {"error": str(error)})
         except Unavailable as error:
