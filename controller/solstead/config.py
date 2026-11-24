@@ -58,6 +58,8 @@ class Config:
     telemetry_settings_path: Path | None = None
     # The owner's Victron solar charger and its Instant Readout key (mode 0600), beside config.json.
     charger_settings_path: Path | None = None
+    # The owner's preferred uplink (Wi-Fi or cellular), beside config.json.
+    uplink_settings_path: Path | None = None
     # Owner-drawn motion areas and shadow filtering, beside config.json.
     motion_settings_path: Path | None = None
     # A small stream the controller checks motion on; unset uses camera_live_url, then camera_url.
@@ -151,6 +153,9 @@ class Config:
             charger_settings_path=(
                 Path(data["charger_settings_path"]) if data.get("charger_settings_path") else None
             ),
+            uplink_settings_path=(
+                Path(data["uplink_settings_path"]) if data.get("uplink_settings_path") else None
+            ),
             motion_settings_path=(
                 Path(data["motion_settings_path"]) if data.get("motion_settings_path") else None
             ),
@@ -182,6 +187,9 @@ class Config:
         data["charger_settings_path"] = data.get("charger_settings_path") or str(
             path.with_name("charger.json")
         )
+        data["uplink_settings_path"] = data.get("uplink_settings_path") or str(
+            path.with_name("uplink.json")
+        )
         data["motion_settings_path"] = data.get("motion_settings_path") or str(
             path.with_name("motion.json")
         )
@@ -195,7 +203,7 @@ class Config:
         for key in (
             "storage_path", "tls_cert", "tls_key", "settings_path", "buffer_path",
             "recipients_path", "telemetry_settings_path", "charger_settings_path",
-            "motion_settings_path", "recognition_model_path",
+            "uplink_settings_path", "motion_settings_path", "recognition_model_path",
         ):  # fmt: skip
             if data[key] is not None:
                 data[key] = str(data[key])

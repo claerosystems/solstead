@@ -201,6 +201,18 @@ public struct ControllerClient: Sendable {
         try decode(ChargerStatus.self, from: await request("v1/charger", method: "DELETE"))
     }
 
+    /// The controller's uplink, radios and preferred link.
+    public func network() async throws -> NetworkStatus {
+        try decode(NetworkStatus.self, from: await request("v1/network"))
+    }
+
+    /// Sets which link the controller prefers. It keeps both links up and falls back to the
+    /// other one if the preferred link has no internet.
+    public func setPreferredUplink(_ preference: NetworkStatus.Preference) async throws -> NetworkStatus {
+        let body = try ControllerJSONEncoder.encoder.encode(NetworkPreferenceUpdate(preferred: preference))
+        return try decode(NetworkStatus.self, from: await request("v1/network", method: "PUT", body: body))
+    }
+
     /// The controller's health log, newest first. `minimumLevel` is info, warning or error.
     public func health(minimumLevel: String = "info", limit: Int = 100) async throws -> [HealthEntry] {
         try decode(HealthList.self, from: await request("v1/health?level=\(minimumLevel)&limit=\(limit)")).entries

@@ -287,3 +287,21 @@ def test_uplink_changes_are_logged(config, ffmpeg):
     ]
     network = controller.status()["network"]
     assert network["uplink"] == "wifi" and network["wifi"]["signal_percent"] == 80
+
+
+def test_failover_runs_on_its_own_thread(config, ffmpeg, monkeypatch):
+    import threading
+
+    import solstead.controller as module
+    from solstead.network import Route
+
+    monkeypatch.setattr(module, "NETWORK_CHECK_SECONDS", 0.01)
+    controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg))
+    checked = threading.Event()
+    controller.routes_reader = lambda: [Route("wlan0", 600)]
+    controller.failover.check = lambda routes, connected: checked.set()
+    controller.start()
+    try:
+        assert checked.wait(2)
+    finally:
+        controller.stop()
