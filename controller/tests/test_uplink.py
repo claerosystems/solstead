@@ -73,7 +73,7 @@ def test_prefer_cellular_swaps_metrics_and_persists(tmp_path):
     nm = FakeNmcli()
     path = tmp_path / "uplink.json"
     uplink = Uplink(path, runner=nm)
-    assert uplink.status() == {"preferred": "wifi", "fallback": False, "fallback_reason": None}
+    assert uplink.status() == {"preferred": "wifi"}
     assert uplink.set_preferred("cellular") is True
     assert nm.metrics == {"1111": 700, "2222": 700, "3333": 600}
     # Only active profiles are reapplied, and nothing is brought down.
@@ -165,6 +165,13 @@ def test_network_endpoints(api):
     assert code == 200 and body["preferred"] == "cellular" and body["uplink"] == "cellular"
     code, status = request(api, "GET", "/v1/status")
     assert status["network"]["preferred"] == "cellular"
+
+    # The fallback fields come from the failover check.
+    api.controller.failover.fallback = True
+    api.controller.failover.fallback_reason = "Cellular is not passing traffic"
+    code, body = request(api, "GET", "/v1/network")
+    assert body["fallback"] is True and body["fallback_reason"] == "Cellular is not passing traffic"
+    api.controller.failover.fallback, api.controller.failover.fallback_reason = False, None
     entries = api.controller.health.recent(5, "info")
     assert any("Owner set cellular as the preferred link" in e["message"] for e in entries)
 

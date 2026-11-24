@@ -108,17 +108,11 @@ class Uplink:
         self.settings_path = Path(settings_path) if settings_path else None
         self.runner = runner
         self.preferred = load_preferred(self.settings_path)
-        # Set by the fallback check when traffic left the preferred link because it failed.
-        self.fallback = False
-        self.fallback_reason: str | None = None
         self._lock = threading.Lock()
 
     def status(self) -> dict:
-        return {
-            "preferred": self.preferred,
-            "fallback": self.fallback,
-            "fallback_reason": self.fallback_reason,
-        }
+        # The controller adds fallback and fallback_reason from the failover check.
+        return {"preferred": self.preferred}
 
     def set_preferred(self, value: object) -> bool:
         """Make `value` the preferred link now and remember it. True if anything changed."""
