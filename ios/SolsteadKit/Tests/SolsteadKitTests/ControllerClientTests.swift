@@ -238,4 +238,25 @@ final class ControllerClientTests: XCTestCase {
             XCTAssertEqual(error as? ControllerError, .unexpectedResponse(status: 502))
         }
     }
+
+    func testSetPreferredUplink() async throws {
+        transport.responses = [(200, Data(#"{"uplink": "cellular", "interface": "wwan0", "preferred": "cellular", "fallback": false}"#.utf8))]
+        let network = try await client.setPreferredUplink(.cellular)
+        XCTAssertEqual(network.preferred, .cellular)
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "PUT")
+        XCTAssertEqual(request.url?.path, "/v1/network")
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
+        XCTAssertEqual(body, ["preferred": "cellular"])
+    }
+
+    func testPreferredUplinkErrorIsShown() async throws {
+        transport.responses = [(503, Data(#"{"error": "NetworkManager refused the change."}"#.utf8))]
+        do {
+            _ = try await client.setPreferredUplink(.wifi)
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? ControllerError, .controller("NetworkManager refused the change.", status: 503))
+        }
+    }
 }
