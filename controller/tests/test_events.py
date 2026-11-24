@@ -43,12 +43,12 @@ def test_event_to_dict_has_duration():
 class Scenario:
     """Recorder with a fake clock, a directory-backed buffer and a fake assembler."""
 
-    def __init__(self, tmp_path, **kwargs):
+    def __init__(self, tmp_path, sealed=None, **kwargs):
         self.now = 1_000_000.0
         self.buffer = SegmentBuffer(
             "rtsp://cam/1", tmp_path / "buf", segment_seconds=2, keep_seconds=600
         )
-        self.store = EventStore(tmp_path / "ssd", 10**9)
+        self.store = EventStore(tmp_path / "ssd", 10**9, sealed)
         self.assembled = []
         self.fail = False
         self.recorder = EventRecorder(

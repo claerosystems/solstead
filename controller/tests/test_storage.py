@@ -30,15 +30,17 @@ def test_read_only_root_is_unavailable(storage_root):
         storage_root.chmod(0o700)
 
 
-def test_reserve_and_commit_clip(storage_root):
+def test_reserve_clip_and_find_it_by_id(storage_root):
     storage = Storage(storage_root, require_mount=False)
-    partial, final = storage.reserve_clip()
-    assert partial.suffix == ".partial" and final.suffix == ".mp4"
-    assert final.parent == storage_root / "manual"
-    partial.write_bytes(b"video")
-    clip = storage.commit_clip(partial, final)
-    assert clip["id"] == final.name and clip["size_bytes"] == 5
-    assert not partial.exists() and final.exists()
+    target = storage.reserve_clip()
+    assert target.suffix == ".mp4" and target.parent == storage_root / "manual"
+    assert storage.clip_path(target.name) is None  # nothing stored there yet
+    target.write_bytes(b"video")
+    assert storage.clip_path(target.name) == target
+    assert storage.describe(target)["size_bytes"] == 5
+    assert storage.plain_clips() == [target]
+    for bad in ("../x.mp4", "x.mp4", target.name + ".partial"):
+        assert storage.clip_path(bad) is None
 
 
 def test_reserve_refuses_when_nearly_full(storage_root):

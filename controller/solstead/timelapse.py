@@ -9,7 +9,6 @@ phone; days of plain frames are still exported here with ffmpeg.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import threading
@@ -19,8 +18,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .sealing import SUFFIX as SEALED_SUFFIX
-from .sealing import read_header, replace_file_header, seal_bytes, seal_file
+from .sealed import SealedRecordings, is_sealed
 
 TIMELAPSE_FOLDER = "timelapse"
 EXPORT_FOLDER = "timelapse-exports"
@@ -112,7 +110,7 @@ class TimeLapse:
         capture: Callable[[int], bytes],
         runner: Runner = subprocess.run,
         clock: Callable[[], float] = time.time,
-        recipients: Callable[[], list[bytes]] = list,
+        sealed: SealedRecordings | None = None,
     ):
         self.root = Path(root)
         self.folder = self.root / TIMELAPSE_FOLDER
@@ -121,9 +119,8 @@ class TimeLapse:
         self.capture = capture
         self.runner = runner
         self.clock = clock
-        self.recipients = recipients
-        # The API thread (header replacement) against the loop (capture, pruning, sealing).
-        self._lock = threading.Lock()
+        self.sealed = sealed or SealedRecordings()
+        self._lock = threading.Lock()  # pruning from capture against pruning from the API
         self.last_capture: float | None = None
         self.last_error: str | None = None
 
@@ -154,24 +151,12 @@ class TimeLapse:
 
     def capture_frame(self, now: float) -> Frame:
         data = self.capture(self.settings.width)
-        keys = self.recipients()
         local = datetime.fromtimestamp(now)
-        day = local.strftime("%Y-%m-%d")
-        name = local.strftime("%H%M%S") + ".jpg"
-        if keys:
-            data, name = seal_bytes(data, keys), name + SEALED_SUFFIX
-        folder = self.folder / day
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / name
-        partial = path.with_name(name + ".partial")
-        with partial.open("wb") as file:
-            file.write(data)
-            file.flush()
-            os.fsync(file.fileno())
-        partial.rename(path)
+        target = self.folder / local.strftime("%Y-%m-%d") / (local.strftime("%H%M%S") + ".jpg")
+        path = self.sealed.write_bytes(target, data)  # sealed in memory with keys enrolled
         self.last_capture = now
         self.prune()
-        return Frame(day, name, int(now), len(data), bool(keys))
+        return Frame(target.parent.name, path.name, int(now), path.stat().st_size, is_sealed(path))
 
     # ---- listing -------------------------------------------------------------------------
 
@@ -188,7 +173,7 @@ class TimeLapse:
                             "date": entry.name,
                             "frames": len(frames),
                             "bytes": sum(p.stat().st_size for p in frames),
-                            "encrypted_frames": sum(p.name.endswith(SEALED_SUFFIX) for p in frames),
+                            "encrypted_frames": sum(is_sealed(p) for p in frames),
                         }
                     )
         return result
@@ -202,7 +187,7 @@ class TimeLapse:
             if FRAME_NAME.match(path.name):
                 stamp = datetime.strptime(day + path.name[:6], "%Y-%m-%d%H%M%S")
                 found.append(Frame(day, path.name, int(stamp.timestamp()), path.stat().st_size,
-                                   path.name.endswith(SEALED_SUFFIX)))  # fmt: skip
+                                   is_sealed(path)))  # fmt: skip
         return found
 
     def frame_path(self, day: str, name: str) -> Path | None:
@@ -241,8 +226,7 @@ class TimeLapse:
         for path in frames:
             if used <= self.settings.allocation_bytes:
                 break
-            used -= path.stat().st_size
-            path.unlink(missing_ok=True)
+            used -= self.sealed.remove(path)
             deleted += 1
             if not any(path.parent.iterdir()):
                 path.parent.rmdir()
@@ -289,35 +273,17 @@ class TimeLapse:
 
     # ---- sealing -------------------------------------------------------------------------
 
-    def seal_plain(self, recipients: list[bytes], limit: int = 50) -> int:
-        """Seal up to `limit` frames captured before keys were enrolled, oldest first.
-
-        Returns how many were sealed; 0 means none are left. As with event clips, the SSD may
-        keep the old plaintext blocks.
-        """
-        with self._lock:
-            sealed = 0
-            for path in self.all_frames():
-                if sealed >= limit:
-                    break
-                if path.name.endswith(SEALED_SUFFIX):
-                    continue
-                target = path.with_name(path.name + SEALED_SUFFIX)
-                if not target.is_file():  # else a crash came between rename and unlink
-                    partial = target.with_name(target.name + ".partial")
-                    seal_file(path, partial, recipients)
-                    partial.rename(target)
-                path.unlink()
-                sealed += 1
-            return sealed
+    def plain_frames(self) -> list[Path]:
+        """Frames captured before keys were enrolled, oldest first."""
+        return [p for p in self.all_frames() if not is_sealed(p)]
 
     def headers(self, day: str) -> list[tuple[str, bytes]]:
         """Each sealed frame's age header, for a key holder to re-wrap (restoring access)."""
         result = []
         for frame in self.frames(day):
-            if frame.encrypted:
-                with (self.folder / day / frame.name).open("rb") as file:
-                    result.append((frame.name, read_header(file)[0]))
+            header = self.sealed.header(self.folder / day / frame.name)
+            if header is not None:
+                result.append((frame.name, header))
         return result
 
     def replace_headers(self, day: str, headers: dict[str, bytes]) -> int:
@@ -331,12 +297,9 @@ class TimeLapse:
         if bad:
             raise TimeLapseError(f"Not a frame name: {bad[0]}")
         replaced = 0
-        with self._lock:
-            for name, header in headers.items():
-                path = self.folder / day / name
-                if name.endswith(SEALED_SUFFIX) and path.is_file():
-                    replace_file_header(path, header)
-                    replaced += 1
+        for name, header in headers.items():
+            if self.sealed.replace_header(self.folder / day / name, header) is not None:
+                replaced += 1
         return replaced
 
     # ---- export --------------------------------------------------------------------------

@@ -153,9 +153,11 @@ See [ADR 0003](../docs/adr/0003-seal-recordings-to-owner-held-keys.md). The owne
 public keys with `PUT /v1/encryption`: at least one `device` key and exactly one `recovery` key,
 as age `age1…` strings. They are stored in `recipients.json` beside `config.json`, never on the SSD.
 From then on each event clip is assembled in RAM, sealed to every enrolled key, and written to the
-SSD as `<id>.mp4.age`; plaintext video never reaches the SSD. Clips recorded before enrolment are
-sealed one at a time in the background (their old blocks may survive on the drive). The
-controller holds no key that can decrypt anything.
+SSD as `<id>.mp4.age`; plaintext video never reaches the SSD. A recording is sealed exactly
+when its file name ends in `.age`. Footage recorded before enrolment is sealed in the background,
+whether or not event recording is running (its old blocks may survive on the drive). The
+controller holds no key that can decrypt anything. All of this lives in one module,
+`solstead/sealed.py`.
 
 A new phone restores access with the recovery key: the app enrols its own key, then for each
 sealed clip fetches the header, adds a stanza for itself using the recovery key, and puts the
@@ -169,7 +171,7 @@ Time-lapse frames (see Time-lapse) and manual test clips (`manual/<id>.mp4.age`,
 like event clips) are sealed the same way once keys are enrolled, and those stored before
 enrolment are sealed in the background; enrolment also deletes cached plaintext time-lapse
 exports. Restoring access re-wraps frame headers a day at a time
-(`/v1/timelapse/{date}/headers`).
+(`/v1/timelapse/{date}/headers`) and manual clips one at a time (`/v1/recordings/{id}/header`).
 
 Any age implementation opens a sealed clip. For bench checks without the app:
 
@@ -295,9 +297,11 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | --- | --- |
 | `GET /v1/status` | Name, version, uptime, CPU temperature, storage readiness and usage, camera state, an `events` block (running, buffer age, motion active, camera subscription, counts, allocation), a `live` block (available, active, quality, ready), and a `timelapse` block (settings and counts). |
 | `GET /v1/camera/snapshot[?width=N]` | One JPEG frame (`image/jpeg`) at `snapshot_width` by default; `width=0` returns the camera's full resolution, taken from the buffer. |
-| `GET /v1/recordings` | `{"recordings": [{id, size_bytes, created_unix, encrypted}, …]}`, newest first, up to 200. |
+| `GET /v1/recordings[?limit=N]` | `{"recordings": [{id, size_bytes, created_unix, encrypted}, …]}`, newest first, 200 unless `limit` says otherwise (up to 100000, as for events). |
 | `POST /v1/recordings` | Records a `clip_seconds` clip to the SSD (sealed as `<id>.mp4.age` when keys are enrolled); returns its entry with status 201. |
 | `GET /v1/recordings/{id}` | The recording's MP4 (`video/mp4`), or when sealed the age file as-is (`application/octet-stream`) for the phone to decrypt, with `Range` support. A plain `{id}` sealed since it was listed returns the sealed file. `HEAD` works too. |
+| `GET /v1/recordings/{id}/header` | Just the age header of a sealed manual clip (`<id>` ends in `.mp4.age`), for a key holder to re-wrap. 404 for unencrypted clips. |
+| `PUT /v1/recordings/{id}/header` | Replace a sealed manual clip's header with a re-wrapped one (raw bytes), with the same checks as for events. Returns the clip's entry. |
 | `GET /v1/events[?limit=N]` | `{"events": [{id, started_unix, ended_unix, clip_from_unix, clip_to_unix, size_bytes, trigger, created_unix, encrypted, duration_seconds}, …]}`, newest first. |
 | `DELETE /v1/events/{id}` | The owner deletes an event: clip and record are removed and the deletion is logged. 404 if unknown. |
 | `GET /v1/events/{id}/clip` | The event's MP4 (`video/mp4`), or when `encrypted` the sealed age file (`application/octet-stream`) for the phone to decrypt, with `Range` support. `HEAD` works too. |

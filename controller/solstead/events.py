@@ -7,14 +7,14 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
 from .buffer import SegmentBuffer
 from .clips import ClipError, assemble
-from .sealing import SUFFIX as SEALED_SUFFIX
-from .sealing import read_header, replace_file_header, seal_file
+from .sealed import SealedRecordings, is_sealed
+from .sealing import SUFFIX, SealingError
 
 EVENTS_FOLDER = "events"
 
@@ -26,10 +26,12 @@ class Event:
     ended_unix: int  # last detected activity
     clip_from_unix: int  # start of footage including pre-roll
     clip_to_unix: int  # end of footage including post-roll
-    size_bytes: int
+    size_bytes: int  # of the clip file as stored; read from it, not kept in <id>.json
     trigger: str
     created_unix: int
-    encrypted: bool = False  # the clip is <id>.mp4.age, sealed to the enrolled keys
+    encrypted: bool = False  # the clip is <id>.mp4.age; read from the file name
+
+    RECORDED = ("size_bytes", "encrypted")  # derived from the clip, never written to the JSON
 
     @property
     def duration_seconds(self) -> int:
@@ -40,38 +42,58 @@ class Event:
 
 
 class EventStore:
-    """events/<id>.mp4[.age] plus <id>.json, oldest deleted when the allocation is exceeded."""
+    """events/<id>.mp4[.age] plus <id>.json, oldest deleted when the allocation is exceeded.
 
-    def __init__(self, root: Path, allocation_bytes: int):
+    <id>.json holds what was known when the event was recorded. Whether the clip is sealed, and
+    its size, come from the clip file itself, so sealing or re-wrapping never touches the JSON.
+    """
+
+    def __init__(self, root: Path, allocation_bytes: int, sealed: SealedRecordings | None = None):
         self.folder = Path(root) / EVENTS_FOLDER
         self.allocation_bytes = allocation_bytes
-        # The API thread (delete, header replacement) against the loop (pruning, sealing).
+        self.sealed = sealed or SealedRecordings()
+        # The API thread (owner deletes) against the loop (pruning).
         self._lock = threading.Lock()
 
     def plain_path(self, event_id: str) -> Path:
         return self.folder / (event_id + ".mp4")
 
     def sealed_path(self, event_id: str) -> Path:
-        return self.folder / (event_id + ".mp4" + SEALED_SUFFIX)
+        return self.folder / (event_id + ".mp4" + SUFFIX)
 
     def clip_path(self, event: Event) -> Path:
         return self.sealed_path(event.id) if event.encrypted else self.plain_path(event.id)
+
+    def _json_path(self, event_id: str) -> Path:
+        return self.folder / (event_id + ".json")
 
     def new_id(self, started: float) -> str:
         stamp = datetime.fromtimestamp(started).strftime("%Y%m%dT%H%M%S")
         return f"{stamp}-{uuid.uuid4().hex[:8]}"
 
+    def write_clip(self, event_id: str, produce: Callable[[Path], None]) -> Path:
+        """Store a new clip through the sealed recordings module; returns where it landed."""
+        return self.sealed.write(self.plain_path(event_id), produce)
+
     def save(self, event: Event) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
-        (self.folder / (event.id + ".json")).write_text(json.dumps(asdict(event)))
+        recorded = {k: v for k, v in asdict(event).items() if k not in Event.RECORDED}
+        self._json_path(event.id).write_text(json.dumps(recorded))
         self.prune()
 
     def load(self, event_id: str) -> Event | None:
-        path = self.folder / (event_id + ".json")
+        path = self._json_path(event_id)
         if "/" in event_id or ".." in event_id or not path.is_file():
             return None
         try:
-            return Event(**json.loads(path.read_text()))
+            recorded = json.loads(path.read_text())
+            for key in Event.RECORDED:  # written by earlier versions; the file decides now
+                recorded.pop(key, None)
+            sealed = self.sealed_path(event_id)
+            # A crash while sealing can leave both forms; the sealed one is complete.
+            clip = sealed if sealed.is_file() else self.plain_path(event_id)
+            size = clip.stat().st_size if clip.is_file() else 0
+            return Event(**recorded, size_bytes=size, encrypted=clip == sealed)
         except (OSError, ValueError, TypeError):
             return None
 
@@ -86,14 +108,20 @@ class EventStore:
         found.sort(key=lambda e: e.started_unix, reverse=True)
         return found[:limit]
 
+    def plain_clips(self) -> list[Path]:
+        """Clips recorded before keys were enrolled, oldest first (ids start with the time)."""
+        if not self.folder.is_dir():
+            return []
+        return sorted(p for p in self.folder.glob("*.mp4") if p.is_file() and not p.is_symlink())
+
     def used_bytes(self) -> int:
         if not self.folder.is_dir():
             return 0
         return sum(p.stat().st_size for p in self.folder.iterdir() if p.is_file())
 
-    def delete(self, event_id: str) -> None:
-        for suffix in (".mp4", ".mp4" + SEALED_SUFFIX, ".json"):
-            (self.folder / (event_id + suffix)).unlink(missing_ok=True)
+    def delete(self, event_id: str) -> int:
+        """Remove an event's clip in any form and its record; returns the bytes freed."""
+        return self.sealed.remove(self.plain_path(event_id)) + _unlink(self._json_path(event_id))
 
     def remove(self, event_id: str) -> bool:
         """The owner deleted an event: its clip and record go. False if there was no such event."""
@@ -106,44 +134,14 @@ class EventStore:
     def header(self, event_id: str) -> bytes | None:
         """The age header of a sealed clip, for a key holder to re-wrap."""
         event = self.load(event_id)
-        if event is None or not event.encrypted or not self.clip_path(event).is_file():
-            return None
-        with self.clip_path(event).open("rb") as file:
-            return read_header(file)[0]
+        return self.sealed.header(self.clip_path(event)) if event else None
 
     def replace_header(self, event_id: str, new_header: bytes) -> Event | None:
-        """Swap a sealed clip's header for a re-wrapped one (sealing.replace_file_header)."""
-        with self._lock:
-            event = self.load(event_id)
-            if event is None or not event.encrypted or not self.clip_path(event).is_file():
-                return None
-            size = replace_file_header(self.clip_path(event), new_header)
-            updated = replace(event, size_bytes=size)
-            (self.folder / (event.id + ".json")).write_text(json.dumps(asdict(updated)))
-            return updated
-
-    def seal_next_plain(self, recipients: list[bytes]) -> Event | None:
-        """Seal one clip recorded before keys were enrolled; None when there are none left.
-
-        The plaintext file is deleted afterwards, but an SSD does not guarantee the old blocks
-        are erased, so footage recorded before enrolment may remain recoverable from the drive.
-        """
-        with self._lock:
-            return self._seal_next_plain(recipients)
-
-    def _seal_next_plain(self, recipients: list[bytes]) -> Event | None:
-        for event in self.events(limit=100000):
-            if event.encrypted:
-                continue
-            plain, sealed = self.plain_path(event.id), self.sealed_path(event.id)
-            partial = sealed.with_name(sealed.name + ".partial")
-            seal_file(plain, partial, recipients)
-            partial.rename(sealed)
-            done = replace(event, encrypted=True, size_bytes=sealed.stat().st_size)
-            (self.folder / (event.id + ".json")).write_text(json.dumps(asdict(done)))
-            plain.unlink()
-            return done
-        return None
+        """Swap a sealed clip's header for a re-wrapped one that keeps every existing key."""
+        event = self.load(event_id)
+        if event is None or self.sealed.replace_header(self.clip_path(event), new_header) is None:
+            return None
+        return self.load(event_id)
 
     def prune(self) -> list[str]:
         """Delete oldest events until the allocation fits. Returns deleted ids."""
@@ -156,11 +154,18 @@ class EventStore:
         used = self.used_bytes()
         while used > self.allocation_bytes and events:
             oldest = events.pop()
-            for path in (self.clip_path(oldest), self.folder / (oldest.id + ".json")):
-                used -= path.stat().st_size if path.exists() else 0
-            self.delete(oldest.id)
+            used -= self.delete(oldest.id)
             deleted.append(oldest.id)
         return deleted
+
+
+def _unlink(path: Path) -> int:
+    try:
+        size = path.stat().st_size
+        path.unlink()
+        return size
+    except FileNotFoundError:
+        return 0
 
 
 class EventRecorder:
@@ -183,8 +188,6 @@ class EventRecorder:
         max_seconds: int = 300,
         assembler: Callable = assemble,
         clock: Callable[[], float] = time.time,
-        work_folder: Path | None = None,
-        recipients: Callable[[], list[bytes]] = list,
     ):
         self.buffer = buffer
         self.store = store
@@ -194,10 +197,6 @@ class EventRecorder:
         self.max_seconds = max_seconds
         self.assembler = assembler
         self.clock = clock
-        # With recipients enrolled, clips are assembled in work_folder (RAM) and only the sealed
-        # file reaches the SSD.
-        self.work_folder = work_folder
-        self.recipients = recipients
         self.started: float | None = None
         self.last_activity: float | None = None
         self.motion_ended: float | None = None
@@ -277,32 +276,17 @@ class EventRecorder:
         clip_to = last + self.post_seconds
         segments = self.buffer.completed_between(clip_from, clip_to)
         event_id = self.store.new_id(started)
-        keys = self.recipients()
-        output = self.store.sealed_path(event_id) if keys else self.store.plain_path(event_id)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        partial = output.with_name(output.name + ".partial")
-        plain = partial
-        if keys:
-            work = self.work_folder or output.parent
-            work.mkdir(parents=True, exist_ok=True)
-            plain = work / (event_id + ".mp4.partial")
         try:
-            self.assembler(segments, plain)
-            if keys:
-                seal_file(plain, partial, keys)
-            partial.rename(output)
-        except (ClipError, OSError) as error:
+            # With keys enrolled the clip is assembled in RAM and only the sealed file is stored.
+            clip = self.store.write_clip(event_id, lambda path: self.assembler(segments, path))
+        except (ClipError, OSError, SealingError) as error:
             self.last_error = str(error) if isinstance(error, ClipError) else "Saving clip failed"
-            partial.unlink(missing_ok=True)
             return None
-        finally:
-            if plain != partial:
-                plain.unlink(missing_ok=True)
         event = Event(
             id=event_id, started_unix=int(started), ended_unix=int(last),
             clip_from_unix=int(segments[0].start), clip_to_unix=int(segments[-1].end),
-            size_bytes=output.stat().st_size, trigger=trigger, created_unix=int(now),
-            encrypted=bool(keys),
+            size_bytes=clip.stat().st_size, trigger=trigger, created_unix=int(now),
+            encrypted=is_sealed(clip),
         )  # fmt: skip
         self.store.save(event)
         self.last_event_unix = event.created_unix

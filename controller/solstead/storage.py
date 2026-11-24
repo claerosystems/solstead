@@ -9,8 +9,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from .sealed import is_sealed
 from .sealing import SUFFIX as SEALED_SUFFIX
-from .sealing import seal_file
 
 MANUAL_FOLDER = "manual"
 CLIP_ID = re.compile(r"[A-Za-z0-9_-]+\.mp4(?:" + re.escape(SEALED_SUFFIX) + ")?")
@@ -50,25 +50,17 @@ class Storage:
         except StorageUnavailable as error:
             return {"ready": False, "error": str(error)}
 
-    def reserve_clip(self, sealed: bool = False) -> tuple[Path, Path]:
-        """Return (partial, final) paths for a new manual clip, checking free space first.
+    def reserve_clip(self) -> Path:
+        """The target path for a new manual clip, checking free space first.
 
-        A sealed clip is <id>.mp4.age; its plaintext is assembled elsewhere, in RAM.
+        The sealed recordings module stores it there, or at <target>.age with keys enrolled.
         """
         if self.usage()["free_bytes"] < self.min_free_bytes:
             gib = self.min_free_bytes / 1024**3
             raise StorageUnavailable(f"Less than {gib:g} GiB free; recording paused")
         folder = self.root / MANUAL_FOLDER
         folder.mkdir(exist_ok=True)
-        final = folder / (str(uuid.uuid4()) + ".mp4" + (SEALED_SUFFIX if sealed else ""))
-        return final.with_name(final.name + ".partial"), final
-
-    @staticmethod
-    def commit_clip(partial: Path, final: Path) -> dict:
-        with partial.open("rb") as file:
-            os.fsync(file.fileno())
-        partial.rename(final)
-        return Storage.describe(final)
+        return folder / (str(uuid.uuid4()) + ".mp4")
 
     @staticmethod
     def describe(path: Path) -> dict:
@@ -77,7 +69,7 @@ class Storage:
             "id": path.name,
             "size_bytes": stat.st_size,
             "created_unix": int(stat.st_mtime),
-            "encrypted": path.name.endswith(SEALED_SUFFIX),
+            "encrypted": is_sealed(path),
         }
 
     def clips(self, limit: int = 200) -> list[dict]:
@@ -111,23 +103,9 @@ class Storage:
                 return path
         return None
 
-    def seal_next_plain_clip(self, recipients: list[bytes]) -> str | None:
-        """Seal one manual clip recorded before keys were enrolled; None when none are left.
-
-        Keeps the clip's time. As with event clips, the SSD may keep the old plaintext blocks.
-        """
+    def plain_clips(self) -> list[Path]:
+        """Manual clips recorded before keys were enrolled, oldest first."""
         folder = self.root / MANUAL_FOLDER
         if not folder.is_dir():
-            return None
-        for plain in sorted(folder.glob("*.mp4")):
-            if not plain.is_file() or plain.is_symlink():
-                continue
-            sealed = plain.with_name(plain.name + SEALED_SUFFIX)
-            partial = sealed.with_name(sealed.name + ".partial")
-            stat = plain.stat()
-            seal_file(plain, partial, recipients)
-            os.utime(partial, (stat.st_atime, stat.st_mtime))
-            partial.rename(sealed)
-            plain.unlink()
-            return sealed.name
-        return None
+            return []
+        return sorted(p for p in folder.glob("*.mp4") if p.is_file() and not p.is_symlink())

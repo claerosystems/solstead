@@ -29,6 +29,7 @@ EVENT_CLIP = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/clip$")
 EVENT = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)$")
 EVENT_HEADER = re.compile(r"^/v1/events/([A-Za-z0-9._-]+)/header$")
 RECORDING = re.compile(r"^/v1/recordings/([A-Za-z0-9._-]+)$")
+RECORDING_HEADER = re.compile(r"^/v1/recordings/([A-Za-z0-9._-]+)/header$")
 LIVE_FILE = re.compile(r"^/v1/live/([A-Za-z0-9._-]+)$")
 TIMELAPSE_DAY = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})$")
 TIMELAPSE_FRAME = re.compile(r"^/v1/timelapse/(\d{4}-\d{2}-\d{2})/(\d{6}\.jpg(?:\.age)?)$")
@@ -115,6 +116,13 @@ class Handler(BaseHTTPRequestHandler):
             raise TimeLapseError("Body must be a JSON object")
         return data
 
+    def read_header(self) -> bytes:
+        """A raw age header body, as sent when re-wrapping a clip for a new phone."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if not 0 < length <= MAX_HEADER:
+            raise SealingError("An age header body is required")
+        return self.rfile.read(length)
+
     def authorized(self) -> bool:
         expected = "Bearer " + self.server.controller.config.api_token
         supplied = self.headers.get("Authorization", "")
@@ -142,7 +150,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.reply(400, {"error": "width must be 0 (full) to 8192"})
                 return self.reply(200, controller.snapshot(width), "image/jpeg")
             if get and path == "/v1/recordings":
-                return self.reply(200, {"recordings": controller.recordings()})
+                limit = min(max(int(query.get("limit", "200") or 200), 1), 100000)
+                return self.reply(200, {"recordings": controller.recordings(limit)})
             if self.command == "POST" and path == "/v1/recordings":
                 return self.reply(201, controller.record())
             recording = RECORDING.match(path)
@@ -257,12 +266,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "No encrypted clip for that event"})
                 return self.reply(200, found, SEALED)
             if header and self.command == "PUT":
-                length = int(self.headers.get("Content-Length") or 0)
-                if not 0 < length <= MAX_HEADER:
-                    return self.reply(400, {"error": "An age header body is required"})
-                updated = controller.replace_event_header(header.group(1), self.rfile.read(length))
+                updated = controller.replace_event_header(header.group(1), self.read_header())
                 if updated is None:
                     return self.reply(404, {"error": "No encrypted clip for that event"})
+                return self.reply(200, updated)
+            header = RECORDING_HEADER.match(path)
+            if header and get:
+                found = controller.recording_header(header.group(1))
+                if found is None:
+                    return self.reply(404, {"error": "No encrypted recording with that id"})
+                return self.reply(200, found, SEALED)
+            if header and self.command == "PUT":
+                updated = controller.replace_recording_header(header.group(1), self.read_header())
+                if updated is None:
+                    return self.reply(404, {"error": "No encrypted recording with that id"})
                 return self.reply(200, updated)
             clip = EVENT_CLIP.match(path)
             if get and clip:
