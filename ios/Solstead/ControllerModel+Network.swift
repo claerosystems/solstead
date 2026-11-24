@@ -16,7 +16,9 @@ extension ControllerModel {
     }
 
     static func preferenceMessage(_ preference: NetworkStatus.Preference, now network: NetworkStatus) -> String {
-        let wanted = "Controller prefers \(preference.name)"
+        let wanted = preference == .automatic
+            ? "Controller set to Automatic (Wi-Fi first)"
+            : "Controller prefers \(preference.name)"
         if let note = network.fallbackNote { return "\(wanted). \(note)" }
         return "\(wanted); now on \(network.uplinkName)."
     }

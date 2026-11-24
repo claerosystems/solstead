@@ -62,5 +62,30 @@ systemctl restart wg-quick@wg0
 # The public half is not secret; keep a readable copy so it can be fetched without root.
 wg pubkey < /etc/wireguard/controller.key > /etc/wireguard-controller.pub
 chmod 644 /etc/wireguard-controller.pub
+
+# Point the controller's internet fallback check at the hub: it pings the hub through each link.
+# Both the system service's and the user service's config are updated where they exist; the
+# controller reads hub_address at start.
+USER_HOME=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)
+for CONFIG in /etc/solstead/config.json "$USER_HOME/.config/solstead/config.json"; do
+  [ -f "$CONFIG" ] || continue
+  python3 - "$CONFIG" "$HUB" <<'PY'
+import json, os, sys
+path, hub = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+data["hub_address"] = hub
+stat = os.stat(path)
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.chown(tmp, stat.st_uid, stat.st_gid)
+os.chmod(tmp, stat.st_mode & 0o7777)
+os.replace(tmp, path)
+PY
+  echo "Set hub_address in $CONFIG; restart the controller to use it for the fallback check."
+done
+
 echo "Tunnel up at $NET.2. Controller public key (add it on the hub), also in /etc/wireguard-controller.pub:"
 cat /etc/wireguard-controller.pub

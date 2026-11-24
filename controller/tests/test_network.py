@@ -4,6 +4,7 @@ import subprocess
 from solstead.network import (
     DEMOTED_METRIC,
     FAIL_CHECKS,
+    PROBE_HOSTS,
     PROMOTED_METRIC,
     RECOVER_CHECKS,
     STRANDED_CHECKS,
@@ -14,6 +15,7 @@ from solstead.network import (
     parse_mmcli,
     parse_routes,
     parse_wireless,
+    probe_hosts,
     read_network,
 )
 
@@ -127,6 +129,14 @@ class Health:
 
 WIFI_FIRST = [Route("wlan0", 600), Route("wwan0", 700)]
 WIFI_DEMOTED = [Route("wwan0", 700), Route("wlan0", DEMOTED_METRIC)]
+
+
+def test_probes_the_hub_when_there_is_one():
+    assert probe_hosts("hub.example.org") == ("hub.example.org",)
+    assert probe_hosts(None) == PROBE_HOSTS
+    links = Links(up={"wlan0", "wwan0"})
+    Failover(Health(), links, hosts=probe_hosts("203.0.113.7")).passes("wlan0")
+    assert links.calls[0][-3:] == ["-I", "wlan0", "203.0.113.7"]
 
 
 def test_routes_one_per_interface_best_first():

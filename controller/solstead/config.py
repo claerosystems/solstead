@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Any
 MIN_TOKEN_LENGTH = 32
 CAMERA_SCHEMES = ("rtsp://", "rtsps://", "http://", "https://")
 DEFAULT_PORT = 8443
+# A host name or IPv4/IPv6 address; it is passed to ping, so never anything starting with '-'.
+HOST_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}")
 
 
 class ConfigError(ValueError):
@@ -58,8 +61,11 @@ class Config:
     telemetry_settings_path: Path | None = None
     # The owner's Victron solar charger and its Instant Readout key (mode 0600), beside config.json.
     charger_settings_path: Path | None = None
-    # The owner's preferred uplink (Wi-Fi or cellular), beside config.json.
+    # The owner's preferred uplink (Automatic, Wi-Fi or cellular), beside config.json.
     uplink_settings_path: Path | None = None
+    # Public address of the owner's WireGuard hub (wireguard-controller.sh writes it). The
+    # internet fallback check pings it through each link; unset, it pings public resolvers.
+    hub_address: str | None = None
     # Owner-drawn motion areas and shadow filtering, beside config.json.
     motion_settings_path: Path | None = None
     # A small stream the controller checks motion on; unset uses camera_live_url, then camera_url.
@@ -109,6 +115,11 @@ class Config:
             value = data.get(key)
             if value is not None and (not isinstance(value, int) or not low <= value <= high):
                 raise ConfigError(f"{key} must be an integer between {low} and {high}")
+        hub_address = data.get("hub_address") or None
+        if hub_address is not None and not (
+            isinstance(hub_address, str) and HOST_PATTERN.fullmatch(hub_address)
+        ):
+            raise ConfigError("hub_address must be a host name or IP address")
         topics = data.get("motion_topics", ["Motion"])
         if not isinstance(topics, list) or not all(isinstance(t, str) and t for t in topics):
             raise ConfigError("motion_topics must be a list of strings")
@@ -156,6 +167,7 @@ class Config:
             uplink_settings_path=(
                 Path(data["uplink_settings_path"]) if data.get("uplink_settings_path") else None
             ),
+            hub_address=hub_address,
             motion_settings_path=(
                 Path(data["motion_settings_path"]) if data.get("motion_settings_path") else None
             ),

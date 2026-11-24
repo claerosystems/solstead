@@ -12,17 +12,22 @@ public struct NetworkStatus: Decodable, Equatable, Sendable {
         public let signalDbm: Int?
     }
 
-    /// Which link the owner wants the controller to use; Wi-Fi until they choose. The controller
-    /// still falls back to the other link when the preferred one has no internet.
+    /// Which link the owner wants the controller to use; Automatic (Wi-Fi first, cellular as
+    /// backup) until they choose. The controller still falls back to the other link when the
+    /// preferred one has no internet.
     public enum Preference: String, Codable, CaseIterable, Sendable {
-        case wifi, cellular
+        case automatic, wifi, cellular
 
         public var name: String {
             switch self {
+            case .automatic: return "Automatic"
             case .wifi: return "Wi-Fi"
             case .cellular: return "Cellular"
             }
         }
+
+        /// The link this choice puts first.
+        public var firstLink: Preference { self == .automatic ? .wifi : self }
     }
 
     public struct Cellular: Decodable, Equatable, Sendable {
@@ -78,7 +83,7 @@ public struct NetworkStatus: Decodable, Equatable, Sendable {
     /// "Using Cellular (LTE): Wi-Fi has no internet." while fallen back; nil otherwise.
     public var fallbackNote: String? {
         guard fallback, uplink != nil else { return nil }
-        let wanted = preferred.map { "\($0.name) isn't working" } ?? "the preferred link isn't working"
+        let wanted = preferred.map { "\($0.firstLink.name) isn't working" } ?? "the preferred link isn't working"
         let reason = fallbackReason.flatMap { $0.isEmpty ? nil : $0 } ?? wanted
         return "Using \(uplinkName): \(reason.hasSuffix(".") ? String(reason.dropLast()) : reason)."
     }

@@ -250,6 +250,15 @@ final class ControllerClientTests: XCTestCase {
         XCTAssertEqual(body, ["preferred": "cellular"])
     }
 
+    func testSetAutomaticUplink() async throws {
+        transport.responses = [(200, Data(#"{"uplink": "wifi", "interface": "wlan0", "preferred": "automatic", "fallback": false}"#.utf8))]
+        let network = try await client.setPreferredUplink(.automatic)
+        XCTAssertEqual(network.preferred, .automatic)
+        let request = try XCTUnwrap(transport.requests.first)
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
+        XCTAssertEqual(body, ["preferred": "automatic"])
+    }
+
     func testPreferredUplinkErrorIsShown() async throws {
         transport.responses = [(503, Data(#"{"error": "NetworkManager refused the change."}"#.utf8))]
         do {

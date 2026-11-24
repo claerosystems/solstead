@@ -17,7 +17,7 @@ from .events import Event, EventRecorder, EventStore
 from .health import HealthLog
 from .live import LiveStream
 from .motion import MotionWatcher
-from .network import Failover, Network, read_network, read_routes
+from .network import Failover, Network, probe_hosts, read_network, read_routes
 from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
@@ -28,7 +28,8 @@ from .storage import Storage, StorageUnavailable, ram_folder
 from .telemetry import Telemetry
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
-from .uplink import NetworkManagerError, Uplink
+from .uplink import AUTOMATIC, NetworkManagerError, Uplink, first_link
+from .uplink import NAMES as UPLINK_NAMES
 from .verifier import MotionGate, MotionVerifier
 from .victron import Charger
 from .zones import MotionSettings, load_motion_settings, save_motion_settings
@@ -151,7 +152,7 @@ class Controller:
         self.network = Network(uplink=None, interface=None)
         self.network_reader = read_network
         self.uplink = uplink or Uplink(config.uplink_settings_path)
-        self.failover = Failover(self.health.record)
+        self.failover = Failover(self.health.record, hosts=probe_hosts(config.hub_address))
         self.routes_reader = read_routes
         self._failover_thread: threading.Thread | None = None
         self._seen: dict = {
@@ -199,7 +200,7 @@ class Controller:
         added since (a new Wi-Fi network, say) starts with NetworkManager's default metric."""
         try:
             if self.uplink.apply():
-                name = "Wi-Fi" if self.uplink.preferred == "wifi" else "cellular"
+                name = UPLINK_NAMES[first_link(self.uplink.preferred)]
                 self.health.record("info", "network", f"Route metrics reset to prefer {name}")
         except NetworkManagerError as error:
             self.health.record("warning", "network", f"Could not apply preferred link: {error}")
@@ -303,8 +304,11 @@ class Controller:
         """The owner picked the link to use while it works; the other stays up as fallback."""
         preferred = changes.get("preferred")
         if self.uplink.set_preferred(preferred):
-            name = "Wi-Fi" if preferred == "wifi" else "cellular"
-            self.health.record("info", "network", f"Owner set {name} as the preferred link")
+            if preferred == AUTOMATIC:
+                message = "Owner set the preferred link to Automatic (Wi-Fi first)"
+            else:
+                message = f"Owner set {UPLINK_NAMES[preferred]} as the preferred link"
+            self.health.record("info", "network", message)
         self.network = self.network_reader()
         return self.network_status()
 

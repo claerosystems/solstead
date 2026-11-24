@@ -1,6 +1,7 @@
 import http.client
 import json
 import subprocess
+from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from threading import Thread
 
@@ -73,7 +74,7 @@ def test_prefer_cellular_swaps_metrics_and_persists(tmp_path):
     nm = FakeNmcli()
     path = tmp_path / "uplink.json"
     uplink = Uplink(path, runner=nm)
-    assert uplink.status() == {"preferred": "wifi"}
+    assert uplink.status() == {"preferred": "automatic"}
     assert uplink.set_preferred("cellular") is True
     assert nm.metrics == {"1111": 700, "2222": 700, "3333": 600}
     # Only active profiles are reapplied, and nothing is brought down.
@@ -102,22 +103,51 @@ def test_apply_at_start_fixes_drifted_profiles(tmp_path):
     assert uplink.apply() is False and nm.writes() == []
 
 
+def test_automatic_restores_wifi_first_and_persists(tmp_path):
+    nm = FakeNmcli()
+    path = tmp_path / "uplink.json"
+    uplink = Uplink(path, runner=nm)
+    uplink.set_preferred("cellular")
+    assert uplink.set_preferred("automatic") is True
+    assert nm.metrics == {"1111": 600, "2222": 600, "3333": 700}
+    assert json.loads(path.read_text()) == {"preferred": "automatic"}
+    assert Uplink(path, runner=nm).status() == {"preferred": "automatic"}
+    # Wi-Fi and Automatic set the same metrics today, so switching between them changes no
+    # profile, but the choice itself is still remembered.
+    nm.calls.clear()
+    assert uplink.set_preferred("wifi") is True and nm.writes() == []
+    assert json.loads(path.read_text()) == {"preferred": "wifi"}
+
+
+def test_automatic_needs_no_particular_profile(tmp_path):
+    nm = FakeNmcli(profiles="solstead-cellular:3333:gsm:cdc-wdm0\n", metrics={"3333": 600})
+    uplink = Uplink(tmp_path / "uplink.json", runner=nm)
+    uplink.set_preferred("automatic")
+    assert nm.metrics == {"3333": 700} and uplink.preferred == "automatic"
+
+
+def test_unknown_saved_choice_reads_as_automatic(tmp_path):
+    path = tmp_path / "uplink.json"
+    path.write_text('{"preferred": "satellite"}')
+    assert Uplink(path, runner=FakeNmcli()).preferred == "automatic"
+
+
 def test_bad_values_and_missing_profiles(tmp_path):
     nm = FakeNmcli(profiles="preconfigured:1111:802-11-wireless:wlan0\n")
     uplink = Uplink(tmp_path / "uplink.json", runner=nm)
-    for bad in ("ethernet", None, 1, "automatic"):
+    for bad in ("ethernet", None, 1, "auto"):
         with pytest.raises(UplinkError):
             uplink.set_preferred(bad)
     with pytest.raises(NoProfile, match="No cellular connection"):
         uplink.set_preferred("cellular")
-    assert uplink.preferred == "wifi" and not (tmp_path / "uplink.json").exists()
+    assert uplink.preferred == "automatic" and not (tmp_path / "uplink.json").exists()
 
 
 def test_networkmanager_refusal_keeps_the_old_choice(tmp_path):
     uplink = Uplink(tmp_path / "uplink.json", runner=FakeNmcli(refuse=True))
     with pytest.raises(NetworkManagerError, match="Insufficient privileges"):
         uplink.set_preferred("cellular")
-    assert uplink.preferred == "wifi" and not (tmp_path / "uplink.json").exists()
+    assert uplink.preferred == "automatic" and not (tmp_path / "uplink.json").exists()
 
     def missing(args, capture_output, text, timeout):
         raise FileNotFoundError
@@ -134,7 +164,8 @@ def api(config, ffmpeg, tmp_path):
         uplink=Uplink(tmp_path / "uplink.json", runner=nm),
     )  # fmt: skip
     readings = iter(
-        [Network(uplink="cellular", interface="wwan0"), Network(uplink="wifi", interface="wlan0")]
+        [Network(uplink="cellular", interface="wwan0")]
+        + [Network(uplink="wifi", interface="wlan0")] * 10
     )
     controller.network_reader = lambda: next(readings)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -158,7 +189,7 @@ def request(server, method, path, payload=None):
 
 def test_network_endpoints(api):
     code, body = request(api, "GET", "/v1/network")
-    assert code == 200 and body["preferred"] == "wifi" and body["fallback"] is False
+    assert code == 200 and body["preferred"] == "automatic" and body["fallback"] is False
     assert "fallback_reason" in body and "uplink" in body
 
     code, body = request(api, "PUT", "/v1/network", {"preferred": "cellular"})
@@ -176,10 +207,23 @@ def test_network_endpoints(api):
     assert any("Owner set cellular as the preferred link" in e["message"] for e in entries)
 
     code, body = request(api, "PUT", "/v1/network", {"preferred": "satellite"})
-    assert code == 400 and "wifi or cellular" in body["error"]
+    assert code == 400 and "automatic, wifi or cellular" in body["error"]
     api.nm.profiles = "preconfigured:1111:802-11-wireless:wlan0\n"
     code, body = request(api, "PUT", "/v1/network", {"preferred": "cellular"})
     assert code == 409
     api.nm.refuse = True
     code, body = request(api, "PUT", "/v1/network", {"preferred": "wifi"})
     assert code == 503 and "NetworkManager refused" in body["error"]
+
+    api.nm.refuse = False
+    code, body = request(api, "PUT", "/v1/network", {"preferred": "automatic"})
+    assert code == 200 and body["preferred"] == "automatic"
+    entries = api.controller.health.recent(5, "info")
+    assert any("Automatic (Wi-Fi first)" in e["message"] for e in entries)
+
+
+def test_failover_pings_the_hub_from_config(config, ffmpeg):
+    camera = Camera(config.camera_url, runner=ffmpeg)
+    assert Controller(config, camera=camera).failover.hosts == ("1.1.1.1", "8.8.8.8")
+    with_hub = replace(config, hub_address="hub.example.org")
+    assert Controller(with_hub, camera=camera).failover.hosts == ("hub.example.org",)
