@@ -139,7 +139,10 @@ def read_network(runner: Runner = subprocess.run, wireless: Path = PROC_WIRELESS
 # lowered. The set-aside state lives only in the route table (the two marker metrics below), so a
 # restarted controller carries on from where it was.
 
-# Two public resolvers run by different operators, so one outage does not look like ours.
+# The owner's WireGuard hub is the check target when config.json names it (hub_address): it is the
+# server the phone reaches the controller through, so a link that cannot reach it is no use for
+# remote access anyway, and nobody else's server is involved. Without a hub, two public resolvers
+# run by different operators are pinged, so one outage does not look like ours.
 PROBE_HOSTS = ("1.1.1.1", "8.8.8.8")
 PROBE_TIMEOUT_SECONDS = 2
 DEMOTED_METRIC = 2000  # a failing Wi-Fi or Ethernet link; anything at or above counts
@@ -151,6 +154,11 @@ RECOVER_CHECKS = 4  # consecutive good checks before switching back (about two m
 STRANDED_CHECKS = 4
 STRANDED_RETRY_SECONDS = 600
 NAMES = {"wifi": "Wi-Fi", "cellular": "cellular", "ethernet": "Ethernet"}
+
+
+def probe_hosts(hub_address: str | None) -> tuple[str, ...]:
+    """What the failover check pings: the owner's hub if there is one, else public resolvers."""
+    return (hub_address,) if hub_address else PROBE_HOSTS
 
 
 @dataclass(frozen=True)

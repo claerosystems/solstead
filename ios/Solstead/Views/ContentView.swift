@@ -386,7 +386,7 @@ struct NetworkSettingsSection: View {
     var body: some View {
         Section {
             Picker("Prefer", selection: Binding(
-                get: { network.preferred ?? .wifi },
+                get: { network.preferred ?? .automatic },
                 set: { choice in
                     guard choice != network.preferred else { return }
                     Task { await model.setPreferredUplink(choice) }
@@ -408,13 +408,14 @@ struct NetworkSettingsSection: View {
         } header: {
             Text("Internet connection")
         } footer: {
-            Text(Self.footer(for: network.preferred ?? .wifi))
+            Text(Self.footer(for: network.preferred ?? .automatic))
         }
     }
 
     static func footer(for preference: NetworkStatus.Preference) -> String {
         let fallback = "If it has no internet, the controller switches to the other link and comes back once it works again."
         switch preference {
+        case .automatic: return "Uses Wi-Fi when it's available and cellular otherwise. " + fallback
         case .wifi: return "Uses Wi-Fi. " + fallback
         case .cellular: return "Uses cellular, which counts against your data plan. " + fallback
         }

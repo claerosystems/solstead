@@ -209,7 +209,9 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   charger errors, and the battery falling below 12.0 V (cleared above 12.6 V). If the Pi's
   Bluetooth is switched off, `rfkill unblock bluetooth` turns it on.
 - **Preferred link.** With both Wi-Fi and cellular set up, the owner picks which one carries
-  traffic (`PUT /v1/network {"preferred": "wifi"|"cellular"}`). Both stay connected: the
+  traffic (`PUT /v1/network {"preferred": "automatic"|"wifi"|"cellular"}`). Automatic is the
+  default and means Wi-Fi first with cellular as backup, NetworkManager's own order; choosing it
+  after Wi-Fi or cellular puts those default metrics back. Both stay connected: the
   controller sets `ipv4.route-metric` to 600 on the preferred link's NetworkManager profiles
   (every Wi-Fi profile, or `solstead-cellular`) and 700 on the other's, then applies it:
   `nmcli device reapply` for Wi-Fi, which keeps the link up, and
@@ -218,13 +220,16 @@ The controller is meant to run for weeks without a visit, so it watches itself:
   preferred link disconnects, NetworkManager withdraws its route and traffic moves to the other
   by itself. The metrics live in the profiles, so they hold across reboots; the choice is also
   kept in `uplink.json` beside `config.json` and re-applied at start in case a profile was added
-  since. Until the owner picks, NetworkManager's defaults (Wi-Fi first) are left alone. Ethernet
+  since. Until the owner picks, the choice reads as Automatic and NetworkManager's defaults are
+  left alone. Ethernet
   (100) still wins on the bench. The controller needs polkit permission for this, which
   `deploy/cellular.sh` installs.
 - **Internet fallback.** Losing a link outright (Wi-Fi drops its access point, the modem
   detaches) already moves traffic to the other default route. Every 30 s, on its own thread,
-  the controller also pings 1.1.1.1 (then 8.8.8.8) through the preferred link, the default route
-  with the lowest metric, so a link that stays up without reaching the internet is caught too.
+  the controller also pings the owner's WireGuard hub (`hub_address`, written into `config.json`
+  by `deploy/wireguard-controller.sh`) through the preferred link, the default route with the
+  lowest metric, so a link that stays up without reaching the internet is caught too. Without a
+  hub address it pings 1.1.1.1, then 8.8.8.8.
   After two missed checks in a row, if another link answers, traffic moves with `nmcli device
   modify` (running settings only, never the saved profile): a failing Wi-Fi or Ethernet link is
   lowered to metric 2000, while for failing cellular the working Wi-Fi link is raised to metric 50
@@ -282,6 +287,7 @@ The bench fake camera is an MPEG-TS stream over HTTP; real cameras use `rtsp://`
 | `buffer_path` | `/dev/shm/solstead-buffer` | Pre-event buffer and clip assembly; must be RAM so plaintext never reaches the SSD. |
 | `recipients_path` | `recipients.json` beside `config.json` | Enrolled public keys recordings are sealed to. |
 | `uplink_settings_path` | `uplink.json` beside `config.json` | The owner's preferred uplink. |
+| `hub_address` | unset | Public host name or IP address of the owner's WireGuard hub; the internet fallback check pings it through each link. Unset, it pings 1.1.1.1 and 8.8.8.8. |
 | `clip_seconds` | `10` | Length of a manual test clip. |
 | `snapshot_width` | `960` | Snapshot width in pixels; height keeps the aspect ratio. |
 | `min_free_bytes` | 2 GiB | Recording pauses below this much free space. |
@@ -310,8 +316,8 @@ All requests need `Authorization: Bearer <api_token>`. Responses are JSON unless
 | `GET /v1/encryption` | `{enrolled, format, recipients: [{role, label, public_key, added_unix}], unencrypted_events, unencrypted_frames}`. Also in the status as `encryption`. |
 | `PUT /v1/encryption` | Replace the enrolled keys: `{"recipients": [{"role": "device"\|"recovery", "label", "public_key": "age1…"}]}`. Affects new recordings only. 400 if the set is invalid. |
 | `DELETE /v1/encryption` | Turn encryption off: forget the enrolled keys so new recordings are stored unencrypted. Clips already sealed stay sealed. |
-| `GET /v1/network` | The `network` block of the status: `uplink` (`wifi`, `cellular`, `ethernet`, `other` or null) and its `interface`, `wifi` and `cellular` signal, `preferred` (`wifi` or `cellular`), and `fallback`/`fallback_reason` (traffic left the preferred link because it failed). |
-| `PUT /v1/network` | `{"preferred": "wifi"\|"cellular"}`: make that link carry traffic while the other stands by. Returns the network block, re-read after the change. 400 for another value, 409 if that link has no NetworkManager connection, 503 if NetworkManager refuses or is missing. |
+| `GET /v1/network` | The `network` block of the status: `uplink` (`wifi`, `cellular`, `ethernet`, `other` or null) and its `interface`, `wifi` and `cellular` signal, `preferred` (`automatic`, `wifi` or `cellular`), and `fallback`/`fallback_reason` (traffic left the preferred link because it failed). |
+| `PUT /v1/network` | `{"preferred": "automatic"\|"wifi"\|"cellular"}`: make that link carry traffic while the other stands by (Automatic: Wi-Fi first). Returns the network block, re-read after the change. 400 for another value, 409 if that link has no NetworkManager connection, 503 if NetworkManager refuses or is missing. |
 | `GET /v1/motion` | `{zones: [{name, points: [[x, y], …]}], ignore_shadows, sensitivity, verify, recognize, objects, check: {…}}`. Points are fractions of the picture, (0, 0) top left. `check` reports whether checking is running, what it sees now, confirmed, ignored and passed-through counts, and `recognition` (available, reason, runs, inference time, last kind and score). |
 | `PUT /v1/motion` | Change any of `zones` (up to 8 areas of 3–16 points), `ignore_shadows`, `sensitivity` (`low`, `medium`, `high`), `recognize`, `objects` (one or more of `person`, `vehicle`, `animal`) and `verify` (false records every camera report unchecked). Applied at once and saved to `motion.json`. 400 if invalid. |
 | `GET /v1/timelapse` | Settings, counts, estimated retention, and the list of days with frames (`date`, `frames`, `bytes`, `encrypted_frames`). |

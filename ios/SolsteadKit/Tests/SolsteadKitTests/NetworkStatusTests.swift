@@ -64,6 +64,18 @@ final class NetworkStatusTests: XCTestCase {
         XCTAssertNil(NetworkStatus(uplink: nil, preferred: .wifi, fallback: true).fallbackNote)
     }
 
+    func testAutomaticPutsWiFiFirst() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let network = try decoder.decode(NetworkStatus.self, from: Data(#"{"uplink": "cellular", "interface": "wwan0", "preferred": "automatic", "fallback": true}"#.utf8))
+        XCTAssertEqual(network.preferred, .automatic)
+        XCTAssertTrue(network.supportsPreference)
+        XCTAssertEqual(NetworkStatus.Preference.automatic.firstLink, .wifi)
+        XCTAssertEqual(NetworkStatus.Preference.cellular.firstLink, .cellular)
+        XCTAssertEqual(network.fallbackNote, "Using Cellular: Wi-Fi isn't working.")
+        XCTAssertEqual(NetworkStatus.Preference.allCases, [.automatic, .wifi, .cellular])
+    }
+
     func testUnknownValuesDoNotFailTheStatus() throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

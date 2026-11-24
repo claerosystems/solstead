@@ -27,6 +27,17 @@ def test_required_keys(missing):
         Config.from_dict(data)
 
 
+def test_hub_address():
+    assert Config.from_dict(GOOD).hub_address is None
+    assert Config.from_dict({**GOOD, "hub_address": "hub.example.org"}).hub_address == (
+        "hub.example.org"
+    )
+    assert Config.from_dict({**GOOD, "hub_address": "203.0.113.7"}).hub_address == "203.0.113.7"
+    for bad in ("-I eth0", "hub example", "a;b", 7, "x" * 300):
+        with pytest.raises(ConfigError, match="hub_address"):
+            Config.from_dict({**GOOD, "hub_address": bad})
+
+
 def test_short_token_rejected():
     with pytest.raises(ConfigError, match="api_token"):
         Config.from_dict({**GOOD, "api_token": "short"})

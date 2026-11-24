@@ -1,4 +1,7 @@
-"""The owner's preferred uplink (Wi-Fi or cellular), applied through NetworkManager route metrics.
+"""The owner's preferred uplink, applied through NetworkManager route metrics.
+
+The owner picks Automatic (the default: Wi-Fi first, cellular as backup, NetworkManager's own
+order), Wi-Fi or cellular.
 
 Both links stay connected. The preferred one gets the lower IPv4 route metric on its
 NetworkManager profiles, so the kernel sends traffic over it while the other stands by with its
@@ -6,7 +9,8 @@ own default route. If the preferred link drops, NetworkManager removes its route
 to the standby link by itself. The metrics are stored in the profiles, so the choice survives a
 reboot even before the controller starts; uplink.json beside config.json keeps the choice for the
 controller, which re-applies it at start in case a profile was added or edited since. Until the
-owner picks, nothing is changed and NetworkManager's defaults (Wi-Fi first) apply.
+owner picks, nothing is changed and NetworkManager's defaults (Wi-Fi first) apply. Choosing
+Automatic later puts those default metrics back.
 
 nmcli needs polkit permission to modify system connections and reapply devices when the
 controller runs as an unprivileged user; deploy/cellular.sh installs that rule.
@@ -23,11 +27,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 KINDS = ("wifi", "cellular")
-DEFAULT_PREFERRED = "wifi"  # NetworkManager's own defaults (Wi-Fi 600, cellular 700) agree
+AUTOMATIC = "automatic"
+CHOICES = (AUTOMATIC, *KINDS)
+DEFAULT_PREFERRED = AUTOMATIC
+# The link Automatic puts first; NetworkManager's own defaults (Wi-Fi 600, cellular 700) agree.
+AUTOMATIC_FIRST = "wifi"
 PREFERRED_METRIC = 600
 STANDBY_METRIC = 700  # Ethernet's 100 still beats both on the bench
 NM_TYPES = {"802-11-wireless": "wifi", "gsm": "cellular"}
-NAMES = {"wifi": "Wi-Fi", "cellular": "cellular"}
+NAMES = {"wifi": "Wi-Fi", "cellular": "cellular", AUTOMATIC: "Automatic"}
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
@@ -83,7 +91,13 @@ def parse_profiles(text: str) -> list[Profile]:
     return profiles
 
 
+def first_link(preferred: str) -> str:
+    """The link a choice puts first: Automatic means Wi-Fi first."""
+    return AUTOMATIC_FIRST if preferred == AUTOMATIC else preferred
+
+
 def metrics_for(preferred: str) -> dict[str, int]:
+    preferred = first_link(preferred)
     return {kind: PREFERRED_METRIC if kind == preferred else STANDBY_METRIC for kind in KINDS}
 
 
@@ -94,7 +108,7 @@ def load_preferred(path: Path | None) -> str:
         value = json.loads(path.read_text()).get("preferred")
     except (OSError, ValueError, AttributeError):
         return DEFAULT_PREFERRED
-    return value if value in KINDS else DEFAULT_PREFERRED
+    return value if value in CHOICES else DEFAULT_PREFERRED
 
 
 def save_preferred(path: Path, preferred: str) -> None:
@@ -115,12 +129,13 @@ class Uplink:
         return {"preferred": self.preferred}
 
     def set_preferred(self, value: object) -> bool:
-        """Make `value` the preferred link now and remember it. True if anything changed."""
-        if value not in KINDS:
-            raise UplinkError("preferred must be wifi or cellular")
+        """Make `value` the preferred link now and remember it. True if anything changed.
+        Automatic needs no particular profile: it is Wi-Fi first when there is Wi-Fi."""
+        if value not in CHOICES:
+            raise UplinkError("preferred must be automatic, wifi or cellular")
         with self._lock:
             profiles = self._profiles()
-            if not any(p.kind == value for p in profiles):
+            if value != AUTOMATIC and not any(p.kind == value for p in profiles):
                 raise NoProfile(f"No {NAMES[value]} connection is set up on the controller")
             changed = self._apply(profiles, value)
             if self.settings_path:
