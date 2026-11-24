@@ -56,6 +56,14 @@ class Config:
     recipients_path: Path | None = None
     # Owner-chosen telemetry retention, also beside config.json.
     telemetry_settings_path: Path | None = None
+    # The owner's Victron solar charger and its Instant Readout key (mode 0600), beside config.json.
+    charger_settings_path: Path | None = None
+    # Owner-drawn motion areas and shadow filtering, beside config.json.
+    motion_settings_path: Path | None = None
+    # A small stream the controller checks motion on; unset uses camera_live_url, then camera_url.
+    camera_motion_url: str | None = None
+    # Person/vehicle recognition model (deploy/fetch-model.sh puts it beside config.json).
+    recognition_model_path: Path | None = None
 
     @property
     def events_enabled(self) -> bool:
@@ -80,6 +88,9 @@ class Config:
         live_url = data.get("camera_live_url") or None
         if live_url is not None and not live_url.startswith(CAMERA_SCHEMES):
             raise ConfigError("camera_live_url must be an rtsp:// or http:// stream URL")
+        motion_url = data.get("camera_motion_url") or None
+        if motion_url is not None and not motion_url.startswith(CAMERA_SCHEMES):
+            raise ConfigError("camera_motion_url must be an rtsp:// or http:// stream URL")
         onvif_url = data.get("camera_onvif_url") or None
         if onvif_url is not None and not onvif_url.startswith(("http://", "https://")):
             raise ConfigError("camera_onvif_url must be an HTTP URL")
@@ -137,6 +148,16 @@ class Config:
                 if data.get("telemetry_settings_path")
                 else None
             ),
+            charger_settings_path=(
+                Path(data["charger_settings_path"]) if data.get("charger_settings_path") else None
+            ),
+            motion_settings_path=(
+                Path(data["motion_settings_path"]) if data.get("motion_settings_path") else None
+            ),
+            camera_motion_url=motion_url,
+            recognition_model_path=(
+                Path(data["recognition_model_path"]) if data.get("recognition_model_path") else None
+            ),
         )
 
     @classmethod
@@ -158,13 +179,23 @@ class Config:
         data["telemetry_settings_path"] = data.get("telemetry_settings_path") or str(
             path.with_name("telemetry.json")
         )
+        data["charger_settings_path"] = data.get("charger_settings_path") or str(
+            path.with_name("charger.json")
+        )
+        data["motion_settings_path"] = data.get("motion_settings_path") or str(
+            path.with_name("motion.json")
+        )
+        data["recognition_model_path"] = data.get("recognition_model_path") or str(
+            path.with_name("ssd_mobilenet_v1_12.onnx")
+        )
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         for key in (
             "storage_path", "tls_cert", "tls_key", "settings_path", "buffer_path",
-            "recipients_path", "telemetry_settings_path",
+            "recipients_path", "telemetry_settings_path", "charger_settings_path",
+            "motion_settings_path", "recognition_model_path",
         ):  # fmt: skip
             if data[key] is not None:
                 data[key] = str(data[key])

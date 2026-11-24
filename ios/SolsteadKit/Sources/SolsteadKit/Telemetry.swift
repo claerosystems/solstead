@@ -45,6 +45,8 @@ public struct TelemetryHistory: Decodable, Equatable, Sendable {
     public let bucketSeconds: Int
     public let retentionDays: Int
     public let points: [TelemetryPoint]
+    /// Solar harvested and system use per local day; absent from controllers without a charger reader.
+    public let energy: [DailyEnergy]?
 
     public var since: Date { Date(timeIntervalSince1970: TimeInterval(sinceUnix)) }
     public var until: Date { Date(timeIntervalSince1970: TimeInterval(untilUnix)) }
@@ -76,7 +78,37 @@ public struct TelemetryPoint: Decodable, Equatable, Identifiable, Sendable {
     public let cpuCHigh: Double?
     public let undervoltage: Int?
     public let throttled: Int?
+    /// From the solar charger: battery volts (with the lowest single reading), charge current,
+    /// solar input and the load output's use, in watts, plus the bucket's energy in watt-hours.
+    public let batteryV: Double?
+    public let batteryVLow: Double?
+    public let batteryVHigh: Double?
+    public let batteryVMin: Double?
+    public let batteryA: Double?
+    public let solarW: Double?
+    public let solarWHigh: Double?
+    public let loadW: Double?
+    public let loadWHigh: Double?
+    public let solarWh: Double?
+    public let loadWh: Double?
+    public let chargeState: String?
 
     public var id: Int { unix }
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(unix)) }
+}
+
+/// One local day's solar harvest and system use. Minutes without a charger reading count as nothing.
+public struct DailyEnergy: Decodable, Equatable, Identifiable, Sendable {
+    public let date: String
+    public let solarWh: Double?
+    public let loadWh: Double?
+
+    public var id: String { date }
+
+    /// Noon of the day, so a bar sits in the middle of its day on a time axis.
+    public var day: Date? {
+        let parts = date.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12))
+    }
 }

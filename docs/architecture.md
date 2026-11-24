@@ -73,7 +73,7 @@ In the order the product notes prioritise validation:
 4. Telemetry (product notes, 2026-09-25): one-minute battery, solar and temperature history on
    the SSD with an owner-chosen retention, shown as charts in the app. Stage 1 uses the Pi's own
    temperature and supply flags; stage 2 adds DS18B20 battery and enclosure probes; stage 3 reads
-   a Victron SmartSolar charger over Bluetooth.
+   a Victron SmartSolar charger over Bluetooth. Stages 1 and 3 are built; stage 2 awaits probes.
 5. SMS alerts and reduced-power mode, reading telemetry once the power path is measured.
 6. Encrypted local storage is built (ADR 0003): event clips, time-lapse frames and manual clips
    are sealed to owner-held keys, and the phone decrypts clips and assembles encrypted

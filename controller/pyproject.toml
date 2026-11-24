@@ -9,10 +9,14 @@ description = "Solstead controller: local ownership, local recording."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-dependencies = ["cryptography>=41"]
+dependencies = ["cryptography>=41", "numpy>=1.24"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5", "pyrage>=1.2"]
+# Bluetooth for the Victron solar charger reader (BlueZ over D-Bus on Linux).
+ble = ["bleak>=0.22"]
+# Person, vehicle and animal recognition for motion checking (model: deploy/fetch-model.sh).
+recognition = ["onnxruntime>=1.17"]
 
 [project.scripts]
 solstead = "solstead.cli:main"

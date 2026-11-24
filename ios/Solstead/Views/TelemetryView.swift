@@ -27,13 +27,23 @@ struct TelemetryView: View {
                     if let error { Text(error).foregroundStyle(.red) }
                     if loading && history == nil { ProgressView() }
                 }
-                Section("Battery and solar") {
-                    Text("Connect a solar charger to see battery voltage, solar input and system use.")
-                        .foregroundStyle(.secondary)
+                if let history, history.points.contains(where: { $0.batteryV != nil }) {
+                    BatterySection(history: history)
+                    PowerSection(history: history)
+                } else {
+                    Section("Battery and solar") {
+                        Text(model.charger?.configured == true
+                             ? "No solar charger readings in this range yet. The controller saves one sample a minute."
+                             : "Connect a solar charger in Settings to see battery voltage, solar input and system use.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let history {
                     TemperatureSection(history: history, thermal: model.status?.thermal)
                     SupplySection(history: history)
+                    if let energy = history.energy, !energy.isEmpty {
+                        EnergySection(history: history, days: energy)
+                    }
                 }
             }
             .navigationTitle("Power & temperature")
@@ -131,6 +141,141 @@ private struct TemperatureSection: View {
         case 3600: return "hour"
         case ..<86400: return "\(seconds / 3600) hours"
         default: return "day"
+        }
+    }
+}
+
+/// Battery voltage: the average of each bucket, with a band down to the lowest single reading,
+/// which catches the sags that brown out the controller.
+private struct BatterySection: View {
+    let history: TelemetryHistory
+    static let lowVolts = 12.0  // the controller logs "Battery low" below this
+
+    var body: some View {
+        let runs = history.segments { $0.batteryV }
+        Section {
+            Chart {
+                ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+                    ForEach(run) { point in
+                        let average = point.batteryV ?? 0
+                        AreaMark(x: .value("Time", point.date),
+                                 yStart: .value("Lowest", point.batteryVMin ?? average),
+                                 yEnd: .value("Highest", point.batteryVHigh ?? average),
+                                 series: .value("Run", "range \(index)"))
+                            .foregroundStyle(Color.green.opacity(0.2))
+                    }
+                    ForEach(run) { point in
+                        LineMark(x: .value("Time", point.date), y: .value("Battery", point.batteryV ?? 0),
+                                 series: .value("Run", "average \(index)"))
+                            .foregroundStyle(Color.green)
+                    }
+                }
+                RuleMark(y: .value("Low", Self.lowVolts))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(Color.red)
+                    .annotation(position: .bottom, alignment: .leading) {
+                        Text("Low \(String(format: "%.1f", Self.lowVolts)) V").font(.caption2).foregroundStyle(.secondary)
+                    }
+            }
+            .timeAxis(history)
+            .chartYScale(domain: .automatic(includesZero: false))
+            .chartYAxisLabel("V")
+            .frame(height: 200)
+            .accessibilityLabel("Battery voltage over the selected range")
+            if let last = history.points.last(where: { $0.batteryV != nil }) {
+                LabeledContent("Latest", value: ChargerFormat.volts(last.batteryV))
+                if let state = last.chargeState {
+                    LabeledContent("Charging", value: state.capitalized)
+                }
+            }
+        } header: {
+            Text("Battery")
+        } footer: {
+            Text("The line is the average of each \(TemperatureSection.duration(history.bucketSeconds)); the band reaches down to the lowest single reading.")
+        }
+    }
+}
+
+/// Solar input and the system's use from the charger's load output, in watts.
+private struct PowerSection: View {
+    let history: TelemetryHistory
+
+    var body: some View {
+        Section {
+            Chart {
+                solarMarks(history.segments { $0.solarW })
+                useMarks(history.segments { $0.loadW })
+            }
+            .chartForegroundStyleScale(["Solar": Color.orange, "System use": Color.blue])
+            .timeAxis(history)
+            .chartYAxisLabel("W")
+            .frame(height: 200)
+            .accessibilityLabel("Solar input and system use over the selected range")
+        } header: {
+            Text("Power")
+        } footer: {
+            Text("Solar is what the charger takes from the panel. System use is the camera and controller on the charger's load output.")
+        }
+    }
+
+    // Split out of `body`: as one expression the chart was too much for the type checker.
+    @ChartContentBuilder
+    private func solarMarks(_ runs: [[TelemetryPoint]]) -> some ChartContent {
+        ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+            ForEach(run) { point in
+                AreaMark(x: .value("Time", point.date), y: .value("Watts", point.solarW ?? 0),
+                         series: .value("Run", "solar \(index)"))
+                    .foregroundStyle(Color.orange.opacity(0.25))
+                LineMark(x: .value("Time", point.date), y: .value("Watts", point.solarW ?? 0),
+                         series: .value("Run", "solar line \(index)"))
+                    .foregroundStyle(by: .value("Series", "Solar"))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func useMarks(_ runs: [[TelemetryPoint]]) -> some ChartContent {
+        ForEach(Array(runs.enumerated()), id: \.offset) { index, run in
+            ForEach(run) { point in
+                LineMark(x: .value("Time", point.date), y: .value("Watts", point.loadW ?? 0),
+                         series: .value("Run", "use \(index)"))
+                    .foregroundStyle(by: .value("Series", "System use"))
+            }
+        }
+    }
+}
+
+/// Watt-hours harvested and used per day, the numbers that say whether the panel keeps up.
+private struct EnergySection: View {
+    let history: TelemetryHistory
+    let days: [DailyEnergy]
+
+    var body: some View {
+        let solar = days.compactMap(\.solarWh).reduce(0, +)
+        let used = days.compactMap(\.loadWh).reduce(0, +)
+        Section {
+            Chart {
+                ForEach(days) { day in
+                    if let date = day.day {
+                        BarMark(x: .value("Day", date, unit: .day), y: .value("Wh", day.solarWh ?? 0))
+                            .foregroundStyle(by: .value("Series", "Harvested"))
+                            .position(by: .value("Series", "Harvested"))
+                        BarMark(x: .value("Day", date, unit: .day), y: .value("Wh", day.loadWh ?? 0))
+                            .foregroundStyle(by: .value("Series", "Used"))
+                            .position(by: .value("Series", "Used"))
+                    }
+                }
+            }
+            .chartForegroundStyleScale(["Harvested": Color.orange, "Used": Color.blue])
+            .chartYAxisLabel("Wh")
+            .frame(height: 180)
+            .accessibilityLabel("Energy harvested and used per day")
+            LabeledContent("Harvested", value: "\(Int(solar.rounded())) Wh")
+            LabeledContent("Used", value: "\(Int(used.rounded())) Wh")
+        } header: {
+            Text("Daily energy")
+        } footer: {
+            Text("Per local day. Minutes without a charger reading count as nothing, so days with gaps read low.")
         }
     }
 }

@@ -335,3 +335,62 @@ def test_telemetry_history_and_retention(api, config):
     assert json.loads(config.telemetry_settings_path.read_text()) == {"retention_days": 90}
     _, body = call(api, "GET", "/v1/status")
     assert json.loads(body)["telemetry"]["retention_days"] == 90
+
+
+def test_charger_endpoints(api, config):
+    from tests.test_victron import ADDRESS, KEY, OTHER_KEY, broadcast, plain
+
+    response, body = call(api, "GET", "/v1/charger")
+    assert response.status == 200 and json.loads(body)["configured"] is False
+    api.controller.charger.handle(ADDRESS, "SmartSolar", -60, broadcast(plain()))
+    status = json.loads(call(api, "GET", "/v1/charger")[1])
+    assert status["seen"][0]["address"] == ADDRESS
+
+    def put(payload):
+        conn = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=5)
+        conn.request("PUT", "/v1/charger", body=json.dumps(payload),
+                     headers={"Authorization": "Bearer " + TOKEN})  # fmt: skip
+        response = conn.getresponse()
+        result = response.status, json.loads(response.read())
+        conn.close()
+        return result
+
+    code, result = put({"address": ADDRESS, "key": OTHER_KEY.hex()})
+    assert code == 400 and "does not match" in result["error"]
+    code, result = put({"address": ADDRESS, "key": "short"})
+    assert code == 400
+    code, result = put({"address": ADDRESS, "key": KEY.hex()})
+    assert code == 200 and result["configured"] and result["reading"]["battery_v"] == 12.77
+    assert KEY.hex() not in json.dumps(result)
+    assert json.loads(config.charger_settings_path.read_text())["address"] == ADDRESS
+    response, body = call(api, "DELETE", "/v1/charger")
+    assert response.status == 200 and json.loads(body)["configured"] is False
+
+
+def put_json(server, path, payload):
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    conn.request(
+        "PUT",
+        path,
+        body=json.dumps(payload),
+        headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"},
+    )
+    response = conn.getresponse()
+    body = json.loads(response.read())
+    conn.close()
+    return response, body
+
+
+def test_motion_areas_round_trip(api, config):
+    response, body = call(api, "GET", "/v1/motion")
+    body = json.loads(body)
+    assert response.status == 200 and body["zones"] == [] and body["ignore_shadows"] is True
+    assert body["check"]["checking"] is False
+    area = {"name": "Driveway", "points": [[0.1, 0.5], [0.9, 0.5], [0.9, 1], [0.1, 1]]}
+    response, body = put_json(api, "/v1/motion", {"zones": [area], "sensitivity": "low"})
+    assert response.status == 200 and body["zones"] == [area] and body["sensitivity"] == "low"
+    assert json.loads(config.motion_settings_path.read_text())["zones"] == [area]
+    response, body = put_json(api, "/v1/motion", {"zones": [{"points": [[0, 0]]}]})
+    assert response.status == 400 and "corner points" in body["error"]
+    response, body = call(api, "GET", "/v1/status")
+    assert "motion_check" in json.loads(body)["events"]

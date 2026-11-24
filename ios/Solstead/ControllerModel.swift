@@ -27,6 +27,9 @@ final class ControllerModel: ObservableObject {
     @Published private(set) var snapshot: Snapshot?
     @Published var message = "Connect to your controller on the same local network."
     @Published private(set) var busy = false
+    /// The camera request the wait card is showing, if any.
+    @Published private(set) var activity: CameraActivity?
+    private var activityTask: Task<Void, Never>?
     /// The recovery key being shown during encryption setup; never stored.
     @Published var recoverySetup: RecoveryKey?
     @Published var showRestore = false
@@ -122,22 +125,43 @@ final class ControllerModel: ObservableObject {
         }
     }
 
-    func startLive(quality: LiveQuality = .low) async {
-        await perform {
-            let client = try connected()
-            message = "Starting live view…"
-            let started = Date()
-            let info = try await client.startLive(quality: quality)
-            let proxy: LiveProxy
-            if let existing = liveSession?.proxy {
-                proxy = existing
-            } else {
-                proxy = try LiveProxy(client: client)
-                try await proxy.start()
+    /// Opens live view from the Camera section, behind the wait card.
+    func viewLive() {
+        runActivity(.live()) { [self] in
+            try await openLive(quality: .low) {
+                self.activity?.phase = .working(step: "Connecting the player…", countdown: nil)
             }
-            liveSession = LiveSession(quality: quality, info: info, proxy: proxy, requestedAt: started)
-            message = "Live view running (\(quality.label.lowercased()) quality)."
+            return nil  // the live sheet is the result
         }
+    }
+
+    /// Switches quality from inside the live sheet, which covers the wait card.
+    func startLive(quality: LiveQuality = .low) async {
+        await perform { try await openLive(quality: quality) {} }
+    }
+
+    private func openLive(quality: LiveQuality, connecting: () -> Void) async throws {
+        let client = try connected()
+        message = "Starting live view…"
+        let started = Date()
+        let info = try await client.startLive(quality: quality)
+        try Task.checkCancellation()
+        let proxy: LiveProxy
+        if let existing = liveSession?.proxy {
+            proxy = existing
+        } else {
+            connecting()
+            proxy = try LiveProxy(client: client)
+            do {
+                try await proxy.start()
+                try Task.checkCancellation()
+            } catch {
+                proxy.stop()
+                throw error
+            }
+        }
+        liveSession = LiveSession(quality: quality, info: info, proxy: proxy, requestedAt: started)
+        message = "Live view running (\(quality.label.lowercased()) quality)."
     }
 
     func stopLive() {
@@ -219,10 +243,11 @@ final class ControllerModel: ObservableObject {
         }
     }
 
-    func takeSnapshot() async {
-        await perform {
+    func takeSnapshot() {
+        runActivity(.snapshot()) { [self] in
             message = "Capturing a full-resolution frame…"
             let data = try await connected().snapshot(width: 0)
+            try Task.checkCancellation()
             guard let image = UIImage(data: data) else { throw ControllerError.invalidImage }
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent("solstead-snapshots", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -231,8 +256,9 @@ final class ControllerModel: ObservableObject {
             let url = folder.appendingPathComponent("Solstead \(stamp).jpg")
             try data.write(to: url, options: .atomic)
             snapshot = Snapshot(image: image, data: data, url: url, taken: Date())
-            try await load(with: try connected())
             message = "Snapshot: \(Int(image.size.width))×\(Int(image.size.height)), \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))."
+            try? await load(with: try connected())  // the snapshot is shown either way
+            return nil  // the snapshot appears in the Camera section
         }
     }
 
@@ -258,13 +284,62 @@ final class ControllerModel: ObservableObject {
         }
     }
 
-    func recordTestClip() async {
-        await perform {
-            message = "Recording a 10-second test clip…"
-            try await connected().record()
-            try await load(with: try connected())
-            message = "Test clip saved on the controller SSD."
+    /// A manual recording: the last ten seconds from the stream buffer, or the next ten when
+    /// the buffer is not running.
+    func saveManualRecording() {
+        runActivity(.recording(bufferRunning: status?.events?.bufferRunning ?? false)) { [self] in
+            let recording = try await connected().record()
+            let size = ByteCountFormatter.string(fromByteCount: recording.sizeBytes, countStyle: .file)
+            message = "Manual recording saved on the controller SSD (\(size))."
+            try? await load(with: try connected())  // saved either way; the list catches up on refresh
+            return "Saved on the controller, \(size)"
         }
+    }
+
+    // MARK: - Wait card
+
+    /// Runs a camera request behind the wait card. `work` returns a line to show with a
+    /// checkmark before the card closes, or nil when its result shows itself.
+    private func runActivity(_ initial: CameraActivity, _ work: @escaping () async throws -> String?) {
+        guard activity == nil, !busy else { return }
+        activity = initial
+        activityTask = Task { [self] in
+            busy = true
+            defer {
+                busy = false
+                activityTask = nil
+            }
+            do {
+                let done = try await work()
+                try Task.checkCancellation()
+                guard let done else {
+                    activity = nil
+                    return
+                }
+                activity?.phase = .succeeded(done)
+                try? await Task.sleep(for: .seconds(1.5))
+                if case .succeeded = activity?.phase { activity = nil }
+            } catch {
+                guard !Task.isCancelled else { return }  // cancelActivity already closed the card
+                message = error.localizedDescription
+                activity?.phase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Stops waiting. The controller may still finish the request; live view is told to stop.
+    func cancelActivity() {
+        guard let current = activity, current.isWorking else { return }
+        activityTask?.cancel()
+        activity = nil
+        message = current.cancelledMessage
+        if current.kind == .live { stopLive() }
+    }
+
+    /// Closes the card after a failure or success.
+    func dismissActivity() {
+        guard let current = activity, !current.isWorking else { return }
+        activity = nil
     }
 
     // MARK: - Internals

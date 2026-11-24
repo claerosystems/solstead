@@ -258,3 +258,32 @@ def test_thermal_transitions_are_logged(config, ffmpeg, tmp_path):
     ]
     status = controller.status()
     assert status["thermal"]["level"] == "warning" and status["temperature_c"] == 70.0
+
+
+def test_uplink_changes_are_logged(config, ffmpeg):
+    import time
+
+    from solstead.network import Network, WiFi
+
+    controller = Controller(config, camera=Camera(config.camera_url, runner=ffmpeg))
+    wifi = Network(uplink="wifi", interface="wlan0", wifi=WiFi("wlan0", 80, -55))
+    readings = iter([
+        wifi,
+        wifi,
+        Network(uplink="cellular", interface="wwan0"),
+        Network(uplink=None, interface=None),
+        wifi,
+    ])  # fmt: skip
+    controller.network_reader = lambda: next(readings)
+    controller._check_network()  # the first reading at start-up is not logged
+    for _ in range(4):
+        controller._last_network_check = time.monotonic() - 100
+        controller._check_network()
+    messages = [(e["level"], e["message"]) for e in reversed(controller.health.recent())]
+    assert messages == [
+        ("info", "Connected over cellular"),
+        ("warning", "No internet connection"),
+        ("info", "Connected over Wi-Fi"),
+    ]
+    network = controller.status()["network"]
+    assert network["uplink"] == "wifi" and network["wifi"]["signal_percent"] == 80

@@ -17,15 +17,20 @@ from .events import Event, EventRecorder, EventStore
 from .health import HealthLog
 from .live import LiveStream
 from .motion import MotionWatcher
+from .network import Network, read_network
 from .onvif import PullPointClient
 from .recipients import RecipientStore
 from .recipients import parse as parse_recipients
+from .recognition import Recognizer
 from .sdnotify import notify
 from .sealed import SealedRecordings
 from .storage import Storage, StorageUnavailable, ram_folder
 from .telemetry import Telemetry
 from .thermal import Thermal, read_thermal
 from .timelapse import TimeLapse, TimeLapseSettings, load_settings, save_settings
+from .verifier import MotionGate, MotionVerifier
+from .victron import Charger
+from .zones import MotionSettings, load_motion_settings, save_motion_settings
 
 LEGACY_BUFFER_FOLDER = "buffer"  # the pre-event buffer lived on the SSD before it moved to RAM
 HEALTH_FILE = "health.jsonl"
@@ -33,6 +38,14 @@ TICK_SECONDS = 0.5
 RETRY_SECONDS = 30
 STORAGE_CHECK_SECONDS = 5
 THERMAL_CHECK_SECONDS = 10
+CHARGER_CHECK_SECONDS = 10
+NETWORK_CHECK_SECONDS = 30
+CHARGER_FRESH_SECONDS = 30  # an older reading is not added to telemetry
+CHARGER_LOST_SECONDS = 300
+# 12 V battery: warn below LOW, all clear again above RECOVERED (both lead-acid and LiFePO4 are
+# well discharged at 12.0 V; the charger's own load disconnect is the real protection).
+BATTERY_LOW_V = 12.0
+BATTERY_RECOVERED_V = 12.6
 CLOCK_SANITY_UNIX = 1767225600  # 2026-01-01: earlier than this and the clock is not set
 # systemd-timesyncd creates this once NTP has set the clock since boot.
 TIMESYNC_MARKER = Path("/run/systemd/timesync/synchronized")
@@ -63,6 +76,7 @@ class Controller:
         recorder: EventRecorder | None = None,
         live: LiveStream | None = None,
         timelapse: TimeLapse | None = None,
+        charger: Charger | None = None,
     ):
         self.config = config
         self.storage = storage or Storage(
@@ -81,12 +95,20 @@ class Controller:
             self.buffer, self.store, config.event_pre_seconds, config.event_post_seconds,
             config.event_hold_seconds, config.event_max_seconds,
         )  # fmt: skip
+        self.motion_settings = load_motion_settings(config.motion_settings_path)
+        self.gate = MotionGate(self.recorder, hold_seconds=config.event_hold_seconds,
+                               lookback=config.event_pre_seconds)  # fmt: skip
+        self.verifier = MotionVerifier(
+            config.camera_motion_url or config.camera_live_url or config.camera_url,
+            self.gate, self.motion_settings,
+            recognizer=Recognizer(config.recognition_model_path),
+        )  # fmt: skip
         if watcher is None and config.events_enabled:
             client = PullPointClient(
                 config.camera_onvif_url, config.camera_user, config.camera_password,
                 topics=config.motion_topics,
             )  # fmt: skip
-            watcher = MotionWatcher(client, self.recorder)
+            watcher = MotionWatcher(client, self.gate)
         self.watcher = watcher
         self.live = live or LiveStream(
             config.camera_live_url, config.camera_url,
@@ -108,6 +130,7 @@ class Controller:
             config.storage_path, config.telemetry_settings_path,
             guard=self._storage_ok, synced=clock_synchronized,
         )  # fmt: skip
+        self.charger = charger or Charger(config.charger_settings_path)
         self.started = time.monotonic()
         self.last_camera_ok: int | None = None
         self.events_running = False
@@ -119,14 +142,22 @@ class Controller:
         self._last_attempt = 0.0
         self._last_storage_check = 0.0
         self._last_thermal_check = 0.0
+        self._last_charger_check = 0.0
+        self._last_network_check = 0.0
+        self._charger_heard = False
+        self._battery_low = False
+        self._charger_error = 0
         self.thermal = Thermal(temperature_c=None)
         self.thermal_reader = read_thermal
+        self.network = Network(uplink=None, interface=None)
+        self.network_reader = read_network
         self._seen: dict = {
             "buffer_restarts": 0,
             "watcher_errors": 0,
             "watcher_error": None,
             "timelapse_error": None,
             "recorder_error": None,
+            "checker_error": None,
             "sealing_error": None,  # the sealed recordings module's last_error
             "clock_warned": False,
         }
@@ -151,12 +182,14 @@ class Controller:
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="controller", daemon=True)
         self._thread.start()
+        self.charger.start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread:
             self._thread.join(5)
             self._thread = None
+        self.charger.stop()
         self._stop_events()
         self.live.stop()
 
@@ -165,12 +198,15 @@ class Controller:
             notify("WATCHDOG=1")
             self._check_storage()
             self._check_thermal()
+            self._check_charger()
+            self._check_network()
             self.telemetry.tick()
             if self.config.events_enabled:
                 self._ensure_events()
             self._poll_incidents()
             self.live.reap()
             if self.events_running:
+                self.gate.tick()
                 try:
                     for event in self.recorder.tick():
                         self.health.record(
@@ -214,6 +250,23 @@ class Controller:
             self.events_reason = None
             self._last_attempt = 0.0  # retry immediately
 
+    def _check_network(self) -> None:
+        """Read the uplink and radio signal; log when the uplink changes."""
+        if time.monotonic() - self._last_network_check < NETWORK_CHECK_SECONDS:
+            return
+        first = self._last_network_check == 0.0
+        self._last_network_check = time.monotonic()
+        before, now = self.network, self.network_reader()
+        self.network = now
+        if first or now.uplink == before.uplink:
+            return
+        names = {"wifi": "Wi-Fi", "cellular": "cellular", "ethernet": "Ethernet"}
+        if now.uplink is None:
+            self.health.record("warning", "network", "No internet connection")
+        else:
+            name = names.get(now.uplink, now.interface or now.uplink)
+            self.health.record("info", "network", f"Connected over {name}", interface=now.interface)
+
     def _check_thermal(self) -> None:
         """Read temperature and Pi power flags; log when they cross into or out of trouble."""
         if time.monotonic() - self._last_thermal_check < THERMAL_CHECK_SECONDS:
@@ -248,6 +301,67 @@ class Controller:
             elif before.temperature_c >= now.warning_c > temp:
                 self.health.record("info", "thermal", f"CPU back to {temp} C", temperature_c=temp)
 
+    def _check_charger(self) -> None:
+        """Add the solar charger's latest reading to telemetry; log when it goes quiet, reports
+        an error or the battery runs low, and when each clears."""
+        if time.monotonic() - self._last_charger_check < CHARGER_CHECK_SECONDS:
+            return
+        self._last_charger_check = time.monotonic()
+        if not self.charger.settings:
+            self._charger_heard = False
+            return
+        reading = self.charger.fresh(CHARGER_FRESH_SECONDS)
+        if reading is None:
+            if self._charger_heard and not self.charger.fresh(CHARGER_LOST_SECONDS):
+                self._charger_heard = False
+                self.health.record("warning", "charger", "Solar charger not heard for 5 minutes")
+            return
+        if not self._charger_heard:
+            self._charger_heard = True
+            name = self.charger.settings.name
+            self.health.record("info", "charger", f"Reading solar charger {name}")
+        self.telemetry.add(
+            battery_v=reading.battery_v, battery_a=reading.battery_a, solar_w=reading.solar_w,
+            load_w=reading.load_w, charge_state=reading.state,
+        )  # fmt: skip
+        volts = reading.battery_v
+        if volts is not None and volts < BATTERY_LOW_V and not self._battery_low:
+            self._battery_low = True
+            self.health.record(
+                "warning", "battery", f"Battery low at {volts:.2f} V", battery_v=volts
+            )
+        elif volts is not None and volts >= BATTERY_RECOVERED_V and self._battery_low:
+            self._battery_low = False
+            self.health.record(
+                "info", "battery", f"Battery recovered to {volts:.2f} V", battery_v=volts
+            )
+        if reading.error != self._charger_error:
+            if reading.error:
+                self.health.record(
+                    "error", "charger", f"Solar charger reports error {reading.error}",
+                    code=reading.error,
+                )  # fmt: skip
+            else:
+                self.health.record("info", "charger", "Solar charger error cleared")
+            self._charger_error = reading.error
+
+    def charger_status(self) -> dict:
+        return {**self.charger.status(), "seen": self.charger.seen()}
+
+    def choose_charger(self, changes: dict) -> dict:
+        settings = self.charger.choose(changes.get("address"), changes.get("key"))
+        self.health.record("info", "charger", f"Solar charger set to {settings.name}")
+        self._charger_heard = False
+        self._last_charger_check = 0.0
+        return self.charger_status()
+
+    def forget_charger(self) -> dict:
+        if self.charger.settings:
+            name = self.charger.settings.name
+            self.health.record("info", "charger", f"Solar charger {name} removed")
+        self.charger.forget()
+        return self.charger_status()
+
     def _ensure_events(self) -> None:
         """Start (or restart after the SSD returns) the buffer and motion watcher."""
         if self.events_running or time.monotonic() - self._last_attempt < RETRY_SECONDS:
@@ -266,6 +380,7 @@ class Controller:
         self.buffer.start()
         if self.watcher:
             self.watcher.start()
+            self.verifier.start()
         self.events_running = True
         self.events_reason = None
         self.health.record("info", "events", "Event recording started")
@@ -285,6 +400,10 @@ class Controller:
                 elif seen["watcher_errors"]:
                     self.health.record("info", "camera", "Camera events are flowing again")
             seen["watcher_errors"] = self.watcher.errors
+        if self.verifier.last_error != seen["checker_error"]:
+            seen["checker_error"] = self.verifier.last_error
+            if self.verifier.last_error:
+                self.health.record("warning", "events", self.verifier.last_error)
         if self.recorder.last_error != seen["recorder_error"]:
             seen["recorder_error"] = self.recorder.last_error
             if self.recorder.last_error:
@@ -307,6 +426,7 @@ class Controller:
     def _stop_events(self) -> None:
         if self.watcher:
             self.watcher.stop()
+        self.verifier.stop()
         self.buffer.stop()
         if self.events_running:
             self.health.record("info", "events", "Event recording stopped")
@@ -326,6 +446,7 @@ class Controller:
             "camera_error": self.watcher.last_error if self.watcher else None,
             "camera_clock_skew_seconds": self.watcher.last_skew_seconds if self.watcher else None,
             "camera_clock_synced_unix": self.watcher.clock_synced_unix if self.watcher else None,
+            "motion_check": {**self.verifier.status(), **self.gate.status()},
             "last_event_unix": self.recorder.last_event_unix,
             "last_error": self.recorder.last_error,
             "count": 0,
@@ -358,6 +479,8 @@ class Controller:
             "timelapse": self.timelapse.status(),
             "encryption": self.encryption_status(),
             "telemetry": self.telemetry.status(),
+            "charger": self.charger.status(),
+            "network": self.network.to_dict(),
             "health": {
                 "clock_ok": clock_ok(),
                 "last_day": self.health.counts(int(time.time()) - 86400),
@@ -422,6 +545,32 @@ class Controller:
         if self.config.settings_path:
             save_settings(self.config.settings_path, settings)
         return self.timelapse.status()
+
+    def motion_status(self) -> dict:
+        return {
+            **self.motion_settings.to_dict(),
+            "check": {**self.verifier.status(), **self.gate.status()},
+        }
+
+    def update_motion(self, changes: dict) -> dict:
+        settings = MotionSettings.from_dict(changes, base=self.motion_settings)
+        if self.config.motion_settings_path:
+            save_motion_settings(self.config.motion_settings_path, settings)
+        self.motion_settings = settings
+        if self.events_running and self.watcher:
+            self.verifier.update(settings)
+        else:
+            self.verifier.settings = settings
+        areas = len(settings.zones)
+        self.health.record(
+            "info", "events",
+            f"Motion settings changed: {areas or 'no'} area{'s' if areas != 1 else ''}, "
+            f"shadows {'ignored' if settings.ignore_shadows else 'counted'}, "
+            f"{settings.sensitivity} sensitivity, "
+            + (f"recording only {' and '.join(settings.objects)}" if settings.recognize
+               else "recognition off"),
+        )  # fmt: skip
+        return self.motion_status()
 
     def update_telemetry(self, changes: dict) -> dict:
         """The owner changed how long telemetry is kept; shortening deletes older days now."""

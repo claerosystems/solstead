@@ -35,7 +35,15 @@ FIELDS: dict[str, tuple[str, str]] = {
     "cpu_c": ("cpu_c", "mean"),
     "undervoltage": ("undervoltage", "any"),
     "throttled": ("throttled", "any"),
+    # From the solar charger.
+    "battery_v": ("battery_v", "mean"),
+    "battery_v_min": ("battery_v", "min"),
+    "battery_a": ("battery_a", "mean"),
+    "solar_w": ("solar_w", "mean"),
+    "load_w": ("load_w", "mean"),
+    "charge_state": ("charge_state", "last"),
 }
+ENERGY = {"solar_w": "solar_wh", "load_w": "load_wh"}  # power field -> daily energy
 
 
 class TelemetryError(Exception):
@@ -84,8 +92,29 @@ def aggregate(samples: list[dict], bucket: int) -> list[dict]:
                 point[field] = values[-1]
             else:
                 point[field] = sum(1 for v in values if v)
+            if field in ENERGY:  # each minute's mean power for one minute
+                point[ENERGY[field]] = round(sum(values) / 60, 2)
         points.append(point)
     return points
+
+
+def daily_energy(hours: list[dict]) -> list[dict]:
+    """Watt-hours per local calendar day, summed from hourly points. Minutes without a charger
+    reading count as nothing, so a day with gaps reads low rather than invented."""
+    days: dict[str, dict] = {}
+    for point in hours:
+        totals = {t: point[t] for t in ENERGY.values() if point.get(t) is not None}
+        if not totals:
+            continue
+        name = datetime.fromtimestamp(point["unix"]).date().isoformat()
+        day = days.setdefault(name, {"date": name})
+        for total, value in totals.items():
+            day[total] = day.get(total, 0) + value
+    for day in days.values():
+        for total in ENERGY.values():
+            if total in day:
+                day[total] = round(day[total], 1)
+    return [days[name] for name in sorted(days)]
 
 
 def bucket_for(span_seconds: int) -> int:
@@ -264,12 +293,13 @@ class Telemetry:
         bucket = bucket_for(span)
         start = int(now - span) // bucket * bucket
         today = utc_day(now)
-        points = []
+        points, hours = [], []
         day = utc_day(start)
         while day <= today:
             points.extend(
                 p for p in self._day_points(day, bucket, today) if start <= p["unix"] <= now
             )
+            hours.extend(p for p in self._day_points(day, 3600, today) if start <= p["unix"] <= now)
             day += timedelta(days=1)
         return {
             "range": range_name,
@@ -278,6 +308,7 @@ class Telemetry:
             "bucket_seconds": bucket,
             "retention_days": self.retention_days,
             "points": points,
+            "energy": daily_energy(hours),
         }
 
     def status(self) -> dict:

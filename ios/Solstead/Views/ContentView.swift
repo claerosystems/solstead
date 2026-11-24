@@ -54,6 +54,120 @@ struct ContentView: View {
                     Button("Settings", systemImage: "gearshape") { model.showSettings = true }
                 }
             }
+            .modifier(TitleWithUplink(network: model.isConnected ? model.status?.network : nil))
+        }
+        .overlay {
+            if let activity = model.activity {
+                WaitCard(activity: activity)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.activity != nil)
+    }
+}
+
+/// Puts the controller's uplink icon beside the large "Solstead" title (iOS 26), or in the
+/// top bar on older systems.
+struct TitleWithUplink: ViewModifier {
+    let network: NetworkStatus?
+
+    func body(content: Content) -> some View {
+        if let network {
+            if #available(iOS 26, *) {
+                content.toolbar {
+                    ToolbarItem(placement: .largeTitle) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text("Solstead").font(.largeTitle.bold())
+                            UplinkIcon(network: network).font(.title3)
+                            Spacer()
+                        }
+                    }
+                }
+            } else {
+                content.toolbar {
+                    ToolbarItem(placement: .principal) { UplinkIcon(network: network) }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// The controller's uplink drawn with its signal: Wi-Fi arcs or cellular bars.
+struct UplinkIcon: View {
+    let network: NetworkStatus
+
+    var body: some View {
+        let percent = network.uplinkSignalPercent
+        Image(systemName: network.symbolName, variableValue: percent.map { Double($0) / 100 })
+            .foregroundStyle(colour(percent))
+            .accessibilityLabel(accessibilityText(percent))
+    }
+
+    private func colour(_ percent: Int?) -> Color {
+        if network.uplink == nil { return .red }
+        if let percent, percent < 30 { return .orange }
+        return .secondary
+    }
+
+    private func accessibilityText(_ percent: Int?) -> String {
+        guard network.uplink != nil else { return "Controller has no internet connection" }
+        let signal = percent.map { ", \(NetworkStatus.strength($0).lowercased()) signal" } ?? ""
+        return "Controller on \(network.uplinkName)\(signal)"
+    }
+}
+
+/// Covers the screen while a camera request runs, wherever the owner has scrolled.
+struct WaitCard: View {
+    @EnvironmentObject private var model: ControllerModel
+    let activity: CameraActivity
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.3).ignoresSafeArea()
+            VStack(spacing: 14) {
+                content
+            }
+            .padding(24)
+            .frame(maxWidth: 300)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch activity.phase {
+        case let .working(step, countdown):
+            TimelineView(.periodic(from: activity.started, by: 0.25)) { context in
+                VStack(spacing: 14) {
+                    if let countdown, countdown.fraction(at: context.date) < 1 {
+                        ProgressView(value: countdown.fraction(at: context.date))
+                        Text(step).multilineTextAlignment(.center)
+                    } else {
+                        ProgressView().controlSize(.large)
+                        Text(countdown?.then ?? step).multilineTextAlignment(.center)
+                    }
+                    Text("\(Int(context.date.timeIntervalSince(activity.started))) s")
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        .accessibilityLabel("\(Int(context.date.timeIntervalSince(activity.started))) seconds elapsed")
+                }
+            }
+            Button("Cancel", role: .cancel) { model.cancelActivity() }
+                .buttonStyle(.bordered)
+        case let .succeeded(text):
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 40)).foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text(text).multilineTextAlignment(.center)
+        case let .failed(error):
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 36)).foregroundStyle(.red)
+                .accessibilityHidden(true)
+            Text(error).foregroundStyle(.red).multilineTextAlignment(.center)
+            Button("OK") { model.dismissActivity() }
+                .buttonStyle(.borderedProminent)
         }
     }
 }
@@ -71,6 +185,9 @@ struct SettingsView: View {
                 }
                 if let lapse = model.timelapse {
                     TimeLapseSettingsSection(lapse: lapse)
+                }
+                if let charger = model.charger {
+                    ChargerSettingsSection(charger: charger)
                 }
                 if let telemetry = model.telemetry {
                     TelemetrySettingsSection(telemetry: telemetry)
@@ -230,6 +347,28 @@ struct PairingSection: View {
     }
 }
 
+/// The controller's uplink and the signal of each radio it has.
+struct NetworkRows: View {
+    let network: NetworkStatus
+
+    var body: some View {
+        LabeledContent("Connection") {
+            Label { Text(network.uplinkName) } icon: { UplinkIcon(network: network) }
+                .labelStyle(.titleAndIcon)
+        }
+        .foregroundStyle(network.uplink == nil ? .red : .primary)
+        if let wifi = network.wifi {
+            LabeledContent(network.uplink == .wifi ? "Wi-Fi signal" : "Wi-Fi signal (standby)",
+                           value: NetworkStatus.describe(percent: wifi.signalPercent, dbm: wifi.signalDbm))
+        }
+        if let cell = network.cellular {
+            LabeledContent(network.uplink == .cellular ? "Cellular signal" : "Cellular signal (standby)",
+                           value: NetworkStatus.describe(percent: cell.signalPercent)
+                               + (cell.operator.map { ", \($0)" } ?? ""))
+        }
+    }
+}
+
 struct HealthSection: View {
     @EnvironmentObject private var model: ControllerModel
     let status: ControllerStatus
@@ -303,6 +442,9 @@ struct HealthSection: View {
                 LabeledContent("Camera", value: status.camera.configured ? "Configured" : "Not configured")
                 if let last = status.camera.lastSuccessUnix {
                     LabeledContent("Last capture", value: Date(timeIntervalSince1970: TimeInterval(last)).formatted(date: .abbreviated, time: .shortened))
+                }
+                if let network = status.network {
+                    NetworkRows(network: network)
                 }
                 LabeledContent("Remote access", value: status.remoteAccess ? "On" : "Off (local network only)")
                 if let health = status.health {
@@ -404,6 +546,7 @@ struct HealthLogView: View {
 struct CameraSection: View {
     @EnvironmentObject private var model: ControllerModel
     let status: ControllerStatus
+    @State private var editingMotionAreas = false
 
     var body: some View {
         Section("Camera") {
@@ -440,15 +583,20 @@ struct CameraSection: View {
                 }
                 .padding(.vertical, 4)
             }
-            Button("View live", systemImage: "video") { Task { await model.startLive() } }
+            Button("View live", systemImage: "video") { model.viewLive() }
                 .disabled(!(status.live?.available ?? status.camera.configured))
-            Button("Take snapshot", systemImage: "camera") { Task { await model.takeSnapshot() } }
+            Button("Take snapshot", systemImage: "camera") { model.takeSnapshot() }
                 .disabled(!status.camera.configured)
-            Button("Record 10-second test clip", systemImage: "record.circle") { Task { await model.recordTestClip() } }
+            Button("Save last 10 seconds", systemImage: "record.circle") { model.saveManualRecording() }
                 .disabled(!status.camera.configured || !status.storage.ready)
-            Text("Manual test recording from the buffered stream.")
+            Text("Saves a manual recording from the stream buffer. If the buffer isn't running, it records the next 10 seconds instead.")
                 .font(.caption).foregroundStyle(.secondary)
+            if status.events?.enabled == true {
+                Button("Motion areas and shadows", systemImage: "square.dashed") { editingMotionAreas = true }
+                    .disabled(!status.camera.configured)
+            }
         }
+        .sheet(isPresented: $editingMotionAreas) { MotionAreasView() }
     }
 }
 
