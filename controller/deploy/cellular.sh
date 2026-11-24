@@ -5,6 +5,8 @@
 # Wi-Fi so a bench Pi keeps using Wi-Fi while it is there, and IPv6 off. Until the customer VPN
 # exists nothing may be reached over cellular, so an nftables table drops every unsolicited inbound
 # packet on the cellular interface (the controller API and SSH listen on all interfaces).
+# It also lets the controller's user (solstead, or the user running sudo for the user-level
+# service) change route metrics through NetworkManager, so the owner can pick the preferred link.
 set -euo pipefail
 APN="${1:-sp.mb.com}"
 NAME=solstead-cellular
@@ -35,6 +37,25 @@ grep -q 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf || printf '\ninclu
 nft -f "$RULES"
 systemctl enable nftables >/dev/null 2>&1 || true
 echo "Inbound over cellular blocked ($RULES)."
+
+# polkit only lets active login sessions change NetworkManager; the controller is a service.
+POLKIT=/etc/polkit-1/rules.d/50-solstead-network.rules
+USERS='"solstead"'
+[ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] && USERS="$USERS, \"$SUDO_USER\""
+mkdir -p "$(dirname "$POLKIT")"
+cat > "$POLKIT" <<RULES
+// Solstead: the controller sets which uplink is preferred (route metrics) from the owner's app.
+polkit.addRule(function(action, subject) {
+  var users = [$USERS];
+  if ((action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+       action.id == "org.freedesktop.NetworkManager.network-control") &&
+      users.indexOf(subject.user) >= 0) {
+    return polkit.Result.YES;
+  }
+});
+RULES
+chmod 644 "$POLKIT"
+echo "Controller may change NetworkManager route metrics ($POLKIT, users: $USERS)."
 
 if ! command -v mmcli >/dev/null; then
   apt-get install -y modemmanager libqmi-utils
