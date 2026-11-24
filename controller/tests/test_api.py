@@ -358,3 +358,32 @@ def test_charger_endpoints(api, config):
     assert json.loads(config.charger_settings_path.read_text())["address"] == ADDRESS
     response, body = call(api, "DELETE", "/v1/charger")
     assert response.status == 200 and json.loads(body)["configured"] is False
+
+
+def put_json(server, path, payload):
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    conn.request(
+        "PUT",
+        path,
+        body=json.dumps(payload),
+        headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"},
+    )
+    response = conn.getresponse()
+    body = json.loads(response.read())
+    conn.close()
+    return response, body
+
+
+def test_motion_areas_round_trip(api, config):
+    response, body = call(api, "GET", "/v1/motion")
+    body = json.loads(body)
+    assert response.status == 200 and body["zones"] == [] and body["ignore_shadows"] is True
+    assert body["check"]["checking"] is False
+    area = {"name": "Driveway", "points": [[0.1, 0.5], [0.9, 0.5], [0.9, 1], [0.1, 1]]}
+    response, body = put_json(api, "/v1/motion", {"zones": [area], "sensitivity": "low"})
+    assert response.status == 200 and body["zones"] == [area] and body["sensitivity"] == "low"
+    assert json.loads(config.motion_settings_path.read_text())["zones"] == [area]
+    response, body = put_json(api, "/v1/motion", {"zones": [{"points": [[0, 0]]}]})
+    assert response.status == 400 and "corner points" in body["error"]
+    response, body = call(api, "GET", "/v1/status")
+    assert "motion_check" in json.loads(body)["events"]

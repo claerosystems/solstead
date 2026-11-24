@@ -546,6 +546,7 @@ struct HealthLogView: View {
 struct CameraSection: View {
     @EnvironmentObject private var model: ControllerModel
     let status: ControllerStatus
+    @State private var editingMotionAreas = false
 
     var body: some View {
         Section("Camera") {
@@ -590,7 +591,12 @@ struct CameraSection: View {
                 .disabled(!status.camera.configured || !status.storage.ready)
             Text("Saves a manual recording from the stream buffer. If the buffer isn't running, it records the next 10 seconds instead.")
                 .font(.caption).foregroundStyle(.secondary)
+            if status.events?.enabled == true {
+                Button("Motion areas and shadows", systemImage: "square.dashed") { editingMotionAreas = true }
+                    .disabled(!status.camera.configured)
+            }
         }
+        .sheet(isPresented: $editingMotionAreas) { MotionAreasView() }
     }
 }
 
